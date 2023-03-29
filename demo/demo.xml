@@ -1,0 +1,48 @@
+<odoo>
+    <data>
+          <record id="pa1" model="res.partner">
+            <field name="name">Partner #1</field>
+            <field name="is_colpari_partner">true</field>
+          </record>
+
+
+          <record id="cl1" model="res.partner">
+            <field name="name">Client #1</field>
+            <field name="is_colpari_client">true</field>
+          </record>
+
+          <record id="pr1" model="project.project">
+            <field name="name">Project #1</field>
+            <field name="colpari_client" ref="cl1"/>
+            <field name="colpari_currency_id" ref="cl1"/>
+            <field name="accounting_interval">month</field>
+
+          </record>
+<!--
+          <record id="object0" model="colpari_data.colpari_data">
+            <field name="name">Object 0</field>
+            <field name="value">0</field>
+          </record>
+
+          <record id="object1" model="colpari_data.colpari_data">
+            <field name="name">Object 1</field>
+            <field name="value">10</field>
+          </record>
+
+          <record id="object2" model="colpari_data.colpari_data">
+            <field name="name">Object 2</field>
+            <field name="value">20</field>
+          </record>
+
+          <record id="object3" model="colpari_data.colpari_data">
+            <field name="name">Object 3</field>
+            <field name="value">30</field>
+          </record>
+
+          <record id="object4" model="colpari_data.colpari_data">
+            <field name="name">Object 4</field>
+            <field name="value">40</field>
+          </record>
+-->
+    </data>
+</odoo>

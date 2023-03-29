@@ -1,0 +1,42 @@
+<odoo>
+    <data>
+      <record id="project_skills_tree" model="ir.ui.view">
+        <field name="name">project.project.skill.tree</field>
+        <field name="model">project.project.skill</field>
+        <field name="inherit_id" ref="colpari_partner_hr.applicant_skills_tree" />
+        <field name="mode">primary</field>
+        <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+        <field name="arch" type="xml"><tree/></field>
+      </record>
+
+
+      <record id="project_skills_form" model="ir.ui.view">
+        <field name="name">project.project.skill.form</field>
+        <field name="model">project.project.skill</field>
+        <field name="inherit_id" ref="colpari_partner_hr.applicant_skills_form" />
+        <field name="mode">primary</field>
+        <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+        <field name="arch" type="xml"><form/></field>
+      </record>
+
+      <record id="service_level_skills_tree" model="ir.ui.view">
+        <field name="name">colpari.service_level.skill.tree</field>
+        <field name="model">colpari.service_level.skill</field>
+        <field name="inherit_id" ref="colpari_partner_hr.applicant_skills_tree" />
+        <field name="mode">primary</field>
+        <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+        <field name="arch" type="xml"><tree/></field>
+      </record>
+
+
+      <record id="service_level_skills_form" model="ir.ui.view">
+        <field name="name">colpari.service_level.skill.form</field>
+        <field name="model">colpari.service_level.skill</field>
+        <field name="inherit_id" ref="colpari_partner_hr.applicant_skills_form" />
+        <field name="mode">primary</field>
+        <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+        <field name="arch" type="xml"><form/></field>
+      </record>
+
+    </data>
+  </odoo>

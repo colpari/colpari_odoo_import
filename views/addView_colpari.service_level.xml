@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- service_levels list -->
+    <record id="colpari_service_levels_tree" model="ir.ui.view">
+      <field name="name">colpari.service_levels.tree</field>
+      <field name="model">colpari.service_level</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree string="Service levels" sample="1">
+          <field name="name" />
+          <field name="skills" widget="many2many_tags" options="{'color_field': 'color'}"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- service_levels form -->
+    <record id="colpari_service_levels_form" model="ir.ui.view">
+      <field name="name">colpari.service_levels.form</field>
+      <field name="model">colpari.service_level</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <h1>Service Level</h1>
+            <group string="YoMama">
+              <field name="name" />
+              <field name="action_types" />
+              <field name="action_unit" />
+              <field name="skills" />
+              <field name="day_type" />
+              <field name="start_hour" />
+              <field name="start_minute" />
+              <field name="end_hour" />
+              <field name="end_minute" />
+              <field name="target_percentage" />
+              <field name="target_time" />
+            </group>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+    <!-- action for service_levels list-->
+    <record model="ir.actions.act_window" id="act_service_levels_window">
+      <field name="name">Service Levels</field>
+      <field name="res_model">colpari.service_level</field>
+      <field name="view_mode">tree,kanban,form</field>
+    </record>
+
+  </data>    
+</odoo>

@@ -1,0 +1,13 @@
+id,name
+action_type_call,call
+action_type_mail,mail
+action_type_chat,chat
+action_type_ticket,ticket
+action_type_incident,incident
+action_type_work,work
+action_type_disposition,disposition
+action_type_training,training
+action_type_meeting,meeting
+action_type_coaching,coaching
+action_type_planning,planning
+action_type_controlling,controlling

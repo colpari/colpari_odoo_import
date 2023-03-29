@@ -1,0 +1,3 @@
+id,name,display_name,uom_type,category_id
+colpari_min,Minutes,minutes,smaller,Working Time
+colpari_mon,Months,months,bigger,Working Time

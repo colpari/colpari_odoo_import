@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- features list -->
+    <record id="colpari_features_tree" model="ir.ui.view">
+      <field name="name">colpari.features.tree</field>
+      <field name="model">colpari.feature</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree editable="bottom" string="Platform features" delete="1" multi_edit="0" edit="0" sample="1">
+          <field name="internal_key" optional="show" string="Internal key" class="font-weight-bold"/>
+          <field name="name" string="Name" />
+          <field name="context" optional="show" string="Context"/>
+          <field name="feature_set"/>  <!-- invisible="1" -->
+        </tree>
+      </field>
+    </record>
+
+    <!-- features form -->
+    <record id="colpari_features_form" model="ir.ui.view">
+      <field name="name">colpari.features.form</field>
+      <field name="model">colpari.feature</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <form>
+          <header>
+            <h1>Header</h1>
+          </header>
+          <sheet>
+            <h1>
+              Feature <field name="name" string="Name"  required="1"/>
+            </h1>
+            <group>
+              <field name="internal_key" optional="show" string="Internal key" required="1"/>
+              <field name="context" optional="show" string="Context"/>
+              <field name="feature_set" optional="show" string="In sets" mode="tree" widget="many2many_checkboxes" />
+              <!-- widget="many2many_checkboxes" -->
+            </group>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+
+    <!-- action for features list-->
+    <record model="ir.actions.act_window" id="act_features_window">
+      <field name="name">colpari features</field>
+      <field name="res_model">colpari.feature</field>
+      <field name="view_mode">tree,kanban,form</field>
+      <!-- <field name="view_id" ref="colpari_features_tree"/> -->
+    </record>
+  </data>  
+</odoo>

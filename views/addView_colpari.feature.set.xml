@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- feature sets list -->
+    <record id="feature_sets_tree" model="ir.ui.view">
+      <field name="name">colpari.feature.sets.tree</field>
+      <field name="model">colpari.feature.set</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree string="Sets of platform features" delete="1" edit="false" sample="1">
+          <field name="name" string="Name" class="font-weight-bold"/>
+          <field name="features" optional="show" string="Features"/>
+        </tree> 
+      </field>
+    </record>
+
+    <!-- feature sets form -->
+    <record id="feature_sets_form" model="ir.ui.view">
+      <field name="name">colpari.feature.sets.form</field>
+      <field name="model">colpari.feature.set</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <form>
+          <div><h3>Feature Set <field name="name" string="Name" class="font-weight-bold"/></h3></div>
+          <div>
+           <h3>Features</h3>
+            <field name="features" optional="show" string="Features" widget="many2many_checkboxes" /></div> 
+            <!-- widget="one2many" mode="tree" widget="many2many_checkboxes" -->
+        </form>
+      </field>
+    </record>
+
+    <!-- action for features sets list-->
+    <record model="ir.actions.act_window" id="act_feature_sets_window">
+      <field name="name">colpari feature sets</field>
+      <field name="res_model">colpari.feature.set</field>
+      <field name="view_mode">tree,kanban,form</field>
+      <!-- <field name="view_id" ref="feature_sets_tree"/>-->
+      <!-- <field name="views">[(feature_sets_tree, "tree"), (feature_sets_form, "form")]</field>  -->
+    </record>
+  </data>
+</odoo>

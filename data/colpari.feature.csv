@@ -1,0 +1,7 @@
+id,feature_set,name,internal_key,context
+feature_1,@colpari.partners default mail,Mailbox @colpari.partners,email.colpari.partners.mailbox
+feature_2,@colpari.partners default mail,WebMail @colpari.partners,email.colpari.partners.webmail
+feature_3,basic Workbench features,Mail App,workbench.apps.mail
+feature_4,basic Workbench features,Chat App,workbench.apps.chat
+feature_5,basic Workbench features,Audio/Video calls,workbench.apps.calls
+feature_6,basic Workbench features,Notes,workbench.apps.notes

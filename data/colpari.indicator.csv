@@ -1,0 +1,6 @@
+id,name,min_value,max_value,isImplicit
+indicator_activityquantity,Activity quantity,0,2147483647,true
+indicator_csat,CSAT,0,100,false
+indicator_nps,NPS,-100,100,false
+indicator_cph,CPH,0,3600,false
+indicator_activitycount,Activity count,0,2147483647,true

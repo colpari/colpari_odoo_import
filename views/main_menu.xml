@@ -1,0 +1,146 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- colpari root -->
+    <menuitem name="colpari" id="colpari_services.menu_root"
+        web_icon="colpari_services,static/src/img/icon-colpari-services.png"
+        groups="group_colpari_user" sequence="-7" />
+
+
+    <!-- services menu entry -->
+    <menuitem name="Services" id="colpari_services.menu_projects_window" parent="colpari_services.menu_root"
+              action="act_projects_window" groups="group_colpari_user" sequence="20"/>
+
+    <!-- clients window menu entry -->
+    <menuitem name="Clients" id="colpari_services.menu_clients_window" parent="colpari_services.menu_root"
+              action="act_clients_window" groups="group_colpari_user" sequence="40"/>
+
+    <!-- partners window menu entry -->
+    <menuitem name="Partners" id="colpari_services.menu_partners_window" parent="colpari_services.menu_root"
+              action="act_partners_window" groups="group_colpari_user" sequence="60"/>
+
+
+    <!-- data menu entry -->
+    <menuitem name="Data" id="colpari_services.menu_data" parent="colpari_services.menu_root" groups="group_colpari_user" sequence="80"/>
+      <!-- data/activities menu entry -->
+      <menuitem name="Activities" id="colpari_services.menu_activities_window" parent="colpari_services.menu_data"
+                action="act_activities_window" groups="group_colpari_user" sequence="10"/>
+      <!-- data/indicator values menu entry -->
+      <menuitem name="Indicator values" id="colpari_services.menu_indicator_values_window" parent="colpari_services.menu_data"
+                action="act_indicator_values_window" groups="group_colpari_user" sequence="20"/>
+      <!-- data/imports menu entry -->
+      <menuitem name="Imports" id="colpari_services.menu_data_imports" parent="colpari_services.menu_data" groups="group_colpari_user" sequence="70"/>
+        <!-- data/3cx imports -->
+        <menuitem name="3CX imports" id="colpari_services.menu_3cx_imports_window" parent="colpari_services.menu_data_imports"
+                  action="act_3cx_imports_window" groups="group_colpari_user" sequence="10"/>
+        <!-- data/zammad_imports -->
+        <menuitem name="Zammad imports" id="colpari_services.menu_zammad_imports_window" parent="colpari_services.menu_data_imports"
+                  action="act_zammad_imports_window" groups="group_colpari_user" sequence="20"/>
+        <!-- data/import runs -->
+        <menuitem name="Import runs" id="colpari_services.menu_import_runs_window" parent="colpari_services.menu_data_imports"
+                  action="act_import_runs_window" groups="group_colpari_user" sequence="30"/>
+
+
+    <!-- settlements menu entry -->
+    <menuitem name="Settlements" id="colpari_services.menu_settlements_window" parent="colpari_services.menu_root"
+              action="act_settlements_window" groups="group_colpari_user" sequence="100"/>
+
+
+    <!-- payments menu entry -->
+    <menuitem name="Payments" id="colpari_services.menu_payments" parent="colpari_services.menu_root" groups="group_colpari_user" sequence="120"/>
+
+    <!-- client payments window menu entry -->
+    <menuitem name="Client payments" id="colpari_services.menu_client_payments_window" parent="colpari_services.menu_payments"
+              action="act_client_payments_window" groups="group_colpari_user" sequence="10"/>
+
+    <!-- partner payments window menu entry -->
+    <menuitem name="Partner payments" id="colpari_services.menu_partner_payments_window" parent="colpari_services.menu_payments"
+              action="act_partner_payments_window" groups="group_colpari_user" sequence="20"/>
+
+    <!-- payments report window menu entry -->
+    <menuitem name="In &amp; Out" id="colpari_services.menu_payments_report_window" parent="colpari_services.menu_payments"
+              action="act_payments_report_window" groups="group_colpari_user" sequence="30"/>
+
+
+      <!-- Settings -->
+    <menuitem name="Settings" id="colpari_services.menu_settings" parent="colpari_services.menu_root" groups="group_colpari_user" sequence="140"/>
+
+      <!-- all have the same sequence number to sort alphabetically -->
+
+      <!-- settings/action_types -->
+      <menuitem name="Action types" id="colpari_services.menu_action_types_window" parent="colpari_services.menu_settings"
+                action="act_action_types_window" groups="group_colpari_user" sequence="10"/>
+
+      <!-- settings/action_units -->
+      <menuitem name="Action units" id="colpari_services.menu_action_units_window" parent="colpari_services.menu_settings"
+                action="act_action_units_window" groups="group_colpari_user" sequence="20"/>
+
+      <!-- settings/features -->
+      <menuitem name="Feature sets" id="colpari_services.menu_feature_sets_window" parent="colpari_services.menu_settings"
+                action="act_feature_sets_window" groups="group_colpari_user" sequence="30"/>
+
+      <!-- settings/Features -->
+      <menuitem name="Features" id="colpari_services.menu_features_window" parent="colpari_services.menu_settings"
+                action="act_features_window" groups="group_colpari_user" sequence="40"/>
+
+      <!-- settings/indicators-->
+      <menuitem name="Indicators" id="colpari_services.menu_indicators_window" parent="colpari_services.menu_settings"
+                action="act_indicators_window" groups="group_colpari_user" sequence="50"/>
+
+      <!-- settings/partner roles -->
+      <menuitem name="Partner roles" id="colpari_services.menu_partner_roles_window" parent="colpari_services.menu_settings"
+                action="act_partner_roles_window" groups="group_colpari_user" sequence="60"/>
+
+      <!-- settings/prices -->
+      <menuitem name="Prices" id="colpari_services.menu_prices" parent="colpari_services.menu_settings" groups="group_colpari_user" sequence="70"/>
+      
+        <menuitem name="Price lists" id="colpari_services.menu_action_price_lists_window" parent="colpari_services.menu_prices"
+                  action="act_action_price_lists_window" groups="group_colpari_user" sequence="10"/>
+        <!-- settings/price lists/price rules -->
+        <menuitem name="Price rules" id="colpari_services.menu_action_price_rules_window" parent="colpari_services.menu_prices"
+                  action="act_action_price_rules_window" groups="group_colpari_user" sequence="120"/>
+
+
+          <!-- cloned products view action from sale module -->
+          <record id="act_product_template_action" model="ir.actions.act_window">
+              <field name="name">Products</field>
+              <field name="type">ir.actions.act_window</field>
+              <field name="res_model">product.template</field>
+              <field name="view_mode">tree,kanban,form,activity</field>
+              <field name="view_id" ref="product.product_template_tree_view"/>
+              <field name="search_view_id" ref="product.product_template_search_view"/>
+              <field name="context">{"search_default_filter_to_sell":1, "sale_multi_pricelist_product_template": 1}</field>
+              <field name="help" type="html">
+                  <p class="o_view_nocontent_smiling_face">
+                      Create a new product
+                  </p><p>
+                      You must define a product for everything you sell or purchase,
+                      whether it's a storable product, a consumable or a service.
+                  </p>
+              </field>
+          </record>
+
+      <!-- settings/products -->
+      <menuitem name="Products" id="sale.product_template_action" parent="colpari_services.menu_settings"
+                action="act_product_template_action" groups="group_colpari_user" sequence="80"/>
+      <!-- settings/service_levels menu entry -->
+      <menuitem name="Service Levels" id="colpari_services.menu_service_levels_window" parent="colpari_services.menu_settings"
+                action="act_service_levels_window" groups="group_colpari_user" sequence="90"/>
+      <!-- settings/skills - using view from HR module -->
+      <menuitem name="Skills" id="colpari_services.menu_skills" parent="colpari_services.menu_settings"
+                action="hr_skills.hr_skill_type_action" groups="group_colpari_user" sequence="100"/>
+
+      <!-- settings/LDAP mappings -->
+      <menuitem name="LDAP mappings" id="colpari_services.menu_ldap_mappings" parent="colpari_services.menu_settings"
+                action="act_ldap_mapping_window" groups="group_colpari_admin" sequence="120"/>
+
+      <!-- settings/LDAP mappings sync -->
+      <menuitem name="LDAP mappings sync 0" id="colpari_services.menu_ldap_mappings_sync_0" parent="colpari_services.menu_settings"
+                action="ldap_sync_0" groups="group_colpari_admin" sequence="140"/>
+      <menuitem name="LDAP mappings sync 1" id="colpari_services.menu_ldap_mappings_sync_1" parent="colpari_services.menu_settings"
+                action="ldap_sync_1" groups="group_colpari_admin" sequence="141"/>
+      <menuitem name="LDAP mappings sync 2" id="colpari_services.menu_ldap_mappings_sync" parent="colpari_services.menu_settings"
+                action="ldap_sync_2" groups="group_colpari_admin" sequence="142"/>
+
+  </data>
+</odoo>

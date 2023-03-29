@@ -1,0 +1,108 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- base activity settlements search -->
+    <record id="colpari_settlements_search" model="ir.ui.view">
+      <field name="name">colpari.settlements.search</field>
+      <field name="model">colpari.settlement</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <search string="Settlements">
+          <field name="name" />
+        </search>
+      </field>
+    </record>
+
+    <!-- base activity settlements list -->
+    <record id="colpari_settlements_tree" model="ir.ui.view">
+      <field name="name">colpari.settlements.tree</field>
+      <field name="model">colpari.settlement</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree string="Settlements" sample="1">
+          <field name="name" />
+      </tree>
+      </field>
+    </record>
+
+    <!-- base activity settlements form -->
+    <record id="colpari_settlements_form" model="ir.ui.view">
+      <field name="name">colpari.settlements.form</field>
+      <field name="model">colpari.settlement</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <form>
+          <sheet string="Payment" width="100%">
+            <group>
+              <field name="name" /><br/>
+              <field name="accounting_interval" /><br/>
+              <field name="periodBegin" string="From"/>
+              <field name="periodEnd" string="To" readonly="0"/>
+              <field name="fallback_product"/>
+            </group>
+
+            <h4>only specific services</h4>
+            <field name="projects" widget="many2many_tags"/>
+            <button name="clearProjects" string="clear" type="object" class="oe_highlight"/>
+            <separator/>
+            
+            <field name="fallback_indicator_values">
+              <tree editable="top">
+                <field name="indicator"/>
+                <field name="project_id"/>
+                <field name="partner_id"/>
+                <field name="value"/>
+              </tree>
+            </field>
+            <separator/>
+
+            <notebook>
+              <page string="Partner accounting">
+                <h4>only specific partners</h4>
+                <field name="partners" widget="many2many_tags"/>
+                <button name="clearPartners" string="clear" type="object" class="oe_highlight"/>
+                <separator/>
+
+                <h4>
+                  <button name="generatePartnerPayments" string="(re)generate" type="object" class="oe_highlight"/>&#x20; 
+                  Partner payments: <field name="partner_payment_count"/>
+                </h4>
+                <field name="partner_payments" mode="tree"/>
+                <separator/>
+
+                <h4><button name="generatePartnerOrders" string="(re)generate" type="object" class="oe_highlight"/> Partner orders:</h4>
+                <field name="partner_orders"/>            
+                <separator/>
+              </page>
+
+              <page string="Client accounting">
+                <h4>
+                  <button name="generateClientPayments" string="(re)generate" type="object" class="oe_highlight"/>
+                  Client payments: <field name="client_payment_count"/>
+                </h4>
+                <field name="client_payments"/>            
+                <separator/>
+
+                <h4><button name="generateClientOrders" string="(re)generate" type="object" class="oe_highlight"/> Client orders:</h4>
+                <field name="client_orders"/>
+                <separator/>
+              </page>
+            </notebook>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+
+
+    <!-- action for settlements overview -->
+    <record model="ir.actions.act_window" id="act_settlements_window">
+      <field name="name">colpari settlements</field>
+      <field name="res_model">colpari.settlement</field>
+      <field name="view_mode">pivot,tree,kanban,form</field>
+      <field name="view_id" ref="colpari_settlements_tree"/>
+      <field name="search_view_id" ref="colpari_settlements_search"/>
+    </record>
+
+  </data>
+</odoo>

@@ -1,0 +1,124 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- ldap_mapping list -->
+    <record id="ldap_mapping_tree" model="ir.ui.view">
+      <field name="name">colpari.ldap_mapping.tree</field>
+      <field name="model">colpari.ldap_mapping</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree string="colpari LDAP mappings" sample="1">
+          <header>
+            <button name="syncAll2" type="object" string="Sync"/>
+          </header>
+          <field name="entry_type" />
+          <field name="entry_rd_name" />
+          <field name="entry_ldap_dn" optional="show" />
+          <field name="entry_ldap_uuid" optional="show" />
+          <field name="related_objects" optional="show" />
+          <field name="sync_state" />
+          <field name="ldap_server" optional="hide"/>
+          <field name="entry_ldap_base_dn" optional="hide"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- ldap_mapping form -->
+    <record id="ldap_mapping_form" model="ir.ui.view">
+      <field name="name">colpari.ldap_mapping.form</field>
+      <field name="model">colpari.ldap_mapping</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <h1>LDAP object mapping</h1>
+            <group>
+              <field name="ldap_server" />
+              <field name="entry_type" />
+              <field name="entry_rd_name" />
+              <field name="entry_ldap_dn" />
+              <field name="entry_ldap_uuid" />
+              <field name="related_objects" />
+              <field name="sync_state" />
+              <field name="entry_ldap_base_dn" />
+            </group>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+    <record id="ldap_mappings_search" model="ir.ui.view">
+      <field name="name">colpari.ldap_mappings.search</field>
+      <field name="model">colpari.ldap_mapping</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>      
+      <field name="arch" type="xml">
+        <search>
+          <field name="entry_rd_name" string="Name"/>
+          <group expand="0" string="Group By">
+              <filter name="grpby_entry_type" string="Type" domain="[]" context="{'group_by': 'entry_type'}"/>
+              <filter name="grpby_sync_state" string="State" domain="[]" context="{'group_by': 'sync_state'}"/>
+          </group>
+        </search>
+      </field>
+    </record>
+
+    <!-- action for ldap_mapping list-->
+    <record model="ir.actions.act_window" id="act_ldap_mapping_window">
+      <field name="name">colpari LDAP mappings</field>
+      <field name="res_model">colpari.ldap_mapping</field>
+      <field name="view_mode">tree,form</field>
+      <field name="search_view_id" ref="ldap_mappings_search"/>
+      <field name="context">{'search_default_grpby_sync_state': 1}</field>
+    </record>
+
+    <!-- ldap sync level 0 -->
+    <record model="ir.actions.server" id="ldap_sync_0">
+      <field name="name">Check state of mappings</field>
+      <field name="model_id" ref="model_colpari_ldap_mapping" />
+      <field name="binding_model_id" ref="model_colpari_ldap_mapping"/>
+      <field name="state">code</field>
+      <field name="code">
+log("m={}, r={}, rs={}".format(model, record, records), level='info')
+if model.env.company.ldaps:
+  model.env.company.ldaps.syncN(0)
+      </field>
+    </record>
+
+    <!-- ldap sync level 1  -->
+    <record model="ir.actions.server" id="ldap_sync_1">
+      <field name="name">Sync local state of mappings</field>
+      <field name="model_id" ref="model_colpari_ldap_mapping" />
+      <field name="binding_model_id" ref="model_colpari_ldap_mapping"/>
+      <field name="state">code</field>
+      <field name="code">
+log("m={}, r={}, rs={}".format(model, record, records), level='info')
+if model.env.company.ldaps:
+  model.env.company.ldaps.syncN(1)
+      </field>
+    </record>
+
+
+    <!-- ldap sync level 2  -->
+    <record model="ir.actions.server" id="ldap_sync_2">
+      <field name="name">Sync LDAP objects with server</field>
+      <field name="model_id" ref="model_colpari_ldap_mapping" />
+      <field name="binding_model_id" ref="model_colpari_ldap_mapping"/>
+      <field name="state">code</field>
+      <field name="code">
+log("m={}, r={}, rs={}".format(model, record, records), level='info')
+if model.env.company.ldaps:
+  model.env.company.ldaps.syncN(2)
+      </field>
+    </record>
+
+    <!-- forget sync state of mappings -->
+    <record model="ir.actions.server" id="ldap_sync_forget_state">
+      <field name="name">Forget sync state of selected mappings</field>
+      <field name="model_id" ref="model_colpari_ldap_mapping" />
+      <field name="binding_model_id" ref="model_colpari_ldap_mapping"/>
+      <field name="state">code</field>
+      <field name="code">records._forgetSyncState()</field>
+    </record>
+
+  </data>
+</odoo>

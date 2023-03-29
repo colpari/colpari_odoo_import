@@ -1,0 +1,298 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- base activity payments search -->
+    <record id="activity_payments_search" model="ir.ui.view">
+      <field name="name">colpari.activity_payments.search</field>
+      <field name="model">colpari.activity_payment</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <search string="Payments">
+          <field name="project_id" />
+          <field name="client_id" />
+          <field name="partner_id" />
+          <field name="accounting_start" />
+          <field name="action_types" />
+          <field name="action_unit" />
+          <field name="price_rule" />
+          <field name="info" />
+          <field name="colpari_state" />
+          <filter name="accounting_start" date="accounting_start" />
+          <filter name="filter_has_partner" string="Partner-related" domain="[('partner_id', '!=', False)]" />
+          <group expand="0" string="Group By">
+              <filter name="filter_accounting_start" context="{'group_by': 'accounting_start'}"/>
+              <filter name="filter_client" context="{'group_by': 'client_id'}"/>
+              <filter name="filter_action_types" string="Action types" domain="[]" context="{'group_by': 'action_types'}"/>
+              <filter name="filter_action_unit" string="Action unit" domain="[]" context="{'group_by': 'action_unit'}"/>
+              <filter name="filter_skills" context="{'group_by': 'skills'}"/>
+              <filter name="filter_project_id" context="{'group_by': 'project_id'}"/>
+              <filter name="filter_partner_id" context="{'group_by': 'partner_id'}"/>
+              <filter name="filter_price_rule" context="{'group_by': 'price_rule'}"/>
+          </group>
+        </search>
+      </field>
+    </record>
+
+    <!-- base activity payments list -->
+    <record id="activity_payments_tree" model="ir.ui.view">
+      <field name="name">colpari.activity_payments.tree</field>
+      <field name="model">colpari.activity_payment</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <tree string="Payments" sample="1">
+          <field name="project_id" />
+          <field name="client_id" />
+          <field name="partner_id" />
+          <field name="accounting_start" />
+          <field name="action_types" widget="many2many_tags" />
+          <field name="action_unit" />
+          <field name="skills" widget="many2many_tags" optional="show" />
+          <field name="price_rule"  optional="show" />
+          <field name="info" optional="hide" />
+          <field name="unit_value" string="Unit value" widget="monetary" avg="Average" />
+          <field name="quantity" optional="show"  sum="Total"/>
+          <field name="value" widget="monetary"  sum="Total" />
+          <field name="write_date" optional="hide" />
+          <field name="colpari_state" optional="hide" />
+          <field name="currency_id" invisible="1" />
+        </tree>
+      </field>
+    </record>
+
+    <!-- base activity payments pivot -->
+    <record id="activity_payments_pivot" model="ir.ui.view">
+      <field name="name">colpari.activity_payments.pivot</field>
+      <field name="model">colpari.activity_payment</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <pivot string="Payments" sample="1">
+          <field name="project_id" />
+          <field name="client_id" />
+          <field name="partner_id" />
+          <field name="accounting_start" />
+          <field name="accounting_end" />
+          <field name="action_types" />
+          <field name="action_unit" />
+          <field name="skills" />
+          <field name="price_rule" />
+          <field name="info" />
+          <field name="quantity" />
+          <field name="colpari_state" />
+          <field name="value" widget="monetary" />
+          <field name="currency_id" invisible="1" />
+        </pivot>
+      </field>
+    </record>
+
+    <!-- base activity payments form -->
+    <record id="activity_payments_form" model="ir.ui.view">
+      <field name="name">colpari.activity_payments.form</field>
+      <field name="model">colpari.activity_payment</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <form>
+          <sheet string="Payment">
+            <group>
+              <field name="project_id" />
+              <field name="client_id" />
+              <field name="partner_id" />
+              <field name="accounting_start" />
+              <field name="accounting_end" />
+              <field name="action_types" widget="many2many_tags" />
+              <field name="action_unit" />
+              <field name="skills" widget="many2many_tags" />
+              <field name="price_rule" />
+              <field name="info" />
+              <field name="quantity" />
+              <field name="value" widget="monetary" />
+              <field name="related_activities" optional="show" />
+              <field name="colpari_state" optional="show" />
+              <field name="currency_id" invisible="1" />
+            </group>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+    <!-- base activity payments graph -->
+    <record id="activity_payments_graph" model="ir.ui.view">
+      <field name="name">colpari.activity_payments.graph</field>
+      <field name="model">colpari.activity_payment</field>
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <graph type="line" sample="1">
+          <field name="accounting_start" />
+          <field name="partner_id"/>
+          <field name="project_id" />
+          <field name="client_id" />
+          <field name="quantity" type="measure" />
+          <field name="value" type="measure" />
+        </graph>
+      </field>
+    </record>
+
+
+
+
+
+    <!-- activity client payments list -->
+    <record id="activity_client_payments_tree" model="ir.ui.view">
+      <field name="name">colpari.activity_client_payments.tree</field>
+      <field name="model">colpari.activity_client_payment</field>
+      <field name="inherit_id" ref="activity_payments_tree" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <xpath expr="/tree" position="attributes">
+          <attribute name="string">Client payments</attribute>
+        </xpath>
+        <field name="partner_id" position="attributes">
+         <attribute name="optional">hide</attribute>
+        </field>
+      </field>
+    </record>
+
+    <!-- activity client payments form -->
+    <record id="activity_client_payments_form" model="ir.ui.view">
+      <field name="name">colpari.activity_client_payments.form</field>
+      <field name="model">colpari.activity_client_payment</field>
+      <field name="inherit_id" ref="activity_payments_form" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <xpath expr="/form/sheet" position="attributes">
+          <attribute name="string">Client payment</attribute>
+        </xpath>
+      </field>
+    </record>
+
+    <!-- activity client payments graph -->
+    <record id="activity_client_payments_graph" model="ir.ui.view">
+      <field name="name">colpari.activity_client_payments.graph</field>
+      <field name="model">colpari.activity_client_payment</field>
+      <field name="inherit_id" ref="activity_payments_graph" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <field name="partner_id" position="replace"/>
+      </field>
+    </record>
+
+    <!-- action for client payments overview -->
+    <record model="ir.actions.act_window" id="act_client_payments_window">
+      <field name="name">colpari Client payments</field>
+      <field name="res_model">colpari.activity_client_payment</field>
+      <field name="view_mode">pivot,tree,form,graph</field>
+      <field name="view_id" ref="activity_payments_pivot"/>
+      <field name="search_view_id" ref="activity_payments_search"/>
+    </record>
+
+
+
+
+
+
+
+
+
+    <!-- activity partner payments list -->
+    <record id="activity_partner_payments_tree" model="ir.ui.view">
+      <field name="name">colpari.activity_partner_payments.tree</field>
+      <field name="model">colpari.activity_partner_payment</field>
+      <field name="inherit_id" ref="activity_payments_tree" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <xpath expr="/tree" position="attributes">
+          <attribute name="string">Partner payments</attribute>
+        </xpath>
+      </field>
+    </record>
+
+
+    <!-- activity partner payments form -->
+    <record id="activity_partner_payments_form" model="ir.ui.view">
+      <field name="name">colpari.activity_partner_payments.form</field>
+      <field name="model">colpari.activity_partner_payment</field>
+      <field name="inherit_id" ref="activity_payments_form" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <xpath expr="/form/sheet" position="attributes">
+          <attribute name="string">Partner payment</attribute>
+        </xpath>
+      </field>
+    </record>
+
+    <!-- activity partner payments graph -->
+    <record id="activity_partner_payments_graph" model="ir.ui.view">
+      <field name="name">colpari.activity_partner_payments.graph</field>
+      <field name="model">colpari.activity_partner_payment</field>
+      <field name="inherit_id" ref="activity_payments_graph" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <!-- <field name="partner_id" position="replace"/> -->
+        <graph></graph>
+      </field>
+    </record>
+
+    <!-- action for partner payments overview -->
+    <record model="ir.actions.act_window" id="act_partner_payments_window">
+      <field name="name">colpari partner payments</field>
+      <field name="res_model">colpari.activity_partner_payment</field>
+      <field name="view_mode">pivot,tree,form,graph</field>
+      <field name="view_id" ref="activity_payments_pivot"/>
+      <field name="search_view_id" ref="activity_payments_search"/>
+    </record>
+
+
+
+
+
+    <!-- activity payments report search -->
+    <record id="activity_payments_report_search" model="ir.ui.view">
+      <field name="name">colpari.activity_payments_report.search</field>
+      <field name="model">colpari.activity_payment_report</field>
+      <field name="inherit_id" ref="activity_payments_search" />
+      <!-- <field name="mode">primary</field> -->
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <field name="project_id" position="before">
+          <field name="direction"/>
+        </field>
+
+        <filter name="filter_accounting_start" position="before">
+          <filter name="filter_direction" context="{'group_by': 'direction'}"/>
+        </filter>
+      </field>
+    </record>
+
+    <!-- activity payments report graph -->
+    <record id="activity_payments_report_graph" model="ir.ui.view">
+      <field name="name">colpari.activity_payments_report.graph</field>
+      <field name="model">colpari.activity_payment_report</field>
+      <field name="inherit_id" ref="activity_payments_graph" />
+      <field name="mode">primary</field>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="arch" type="xml">
+        <field name="value" position="after"><field name="signed_value" string="Value +/-" type="measure" /></field>
+      </field>
+    </record>
+
+    <!-- action for payments report -->
+    <record model="ir.actions.act_window" id="act_payments_report_window">
+      <field name="name">colpari payments</field>
+      <field name="res_model">colpari.activity_payment_report</field>
+      <field name="view_mode">tree,pivot,form,graph</field>
+      <field name="view_id" ref="activity_payments_report_graph"/>
+      <field name="search_view_id" ref="activity_payments_report_search"/>
+      <!-- <field name="context">{'search_default_filter_accounting_start':1, 'search_default_filter_direction':2}</field> -->
+    </record>
+
+
+
+
+  </data>
+</odoo>

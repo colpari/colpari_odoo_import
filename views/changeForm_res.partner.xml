@@ -1,0 +1,168 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <record id="view_partner_form" model="ir.ui.view">
+      <field name="name">res.partner.form</field>
+      <field name="model">res.partner</field>
+      <field name="inherit_id" ref="base.view_partner_form"/>
+      <field name="groups_id" eval="[(4, ref('colpari_services.group_colpari_user'))]"/>
+      <field name="priority">9999</field> <!-- we wan't to come last -->
+      <field name="arch" type="xml">
+
+        <!-- replace name with name components -->
+        <xpath expr="/form/sheet/div/h1" position="after">
+          <h4>
+            <field name="first_name" placeholder="First name" class="oe_inline" />
+            <field name="middle_name"  placeholder="Middle name" style="padding-left: 0.3%; padding-right: 0.3%" class="oe_inline"/>
+            <field name="last_name"  placeholder="Last name" class="oe_inline"/>
+          </h4>
+          <!-- <field name="name" attrs="{'invisible': 1}" /> --> <!-- field must be present in view -->
+        </xpath>
+
+        <!-- add colpari attributes after company/individual selector -->
+        <field name="company_type" position="after">
+          <div class="o_horizontal o_field_widget custom-control">
+            <field name="is_colpari_client" string="is colpari Client"/>colpari Client
+          </div>
+          <div class="o_horizontal o_field_widget custom-control">
+            <field name="is_colpari_partner" string="is colpari Partner"/>colpari Partner
+          </div>
+        </field>
+
+        <!-- add colpari partner currency after tax id (vat) -->
+        <field name="vat" position="before">
+          <field name="birthday" />
+          <field name="taxId" />
+        </field>
+
+        <!-- delete the autofocus attribute from the Contacts & Addresses page -->
+        <xpath expr="//page[@name='contact_addresses']" position="attributes">
+          <attribute name="autofocus"/>
+        </xpath>
+
+        <!-- hide social media tab for colpari partners -->
+        <page name="social_media" position="attributes">
+          <attribute name="attrs">
+            {'invisible': [('is_colpari_partner', '=', True)]}
+          </attribute>
+        </page>
+
+        <!-- invoicing page -->
+        <xpath expr="//page[@name='accounting']/group" position="replace">
+          <field name="bank_ids" nolabel="1">
+            <tree default_order='write_date desc'>
+              <field name="bank_id"/>
+              <field name="acc_number"/>
+              <field name="write_date"/>
+            </tree>
+          </field>
+          <button type="action" class="btn-link" name="64"
+            context="{'search_default_partner_id': active_id, 'default_partner_id': active_id, 'form_view_ref': 'account.view_company_partner_bank_form'}"
+            string="View accounts detail" colspan="2"
+          />
+          <group>
+            <field name="currency_id" invisible="1" can_create="true" can_write="true" modifiers="{&quot;invisible&quot;: true, &quot;required&quot;: true}"/>
+            <field name="property_account_receivable_id" can_create="true" can_write="true" modifiers="{&quot;required&quot;: true}"/>
+            <field name="property_account_payable_id" can_create="true" can_write="true" modifiers="{&quot;required&quot;: true}"/>
+          </group>
+        </xpath>
+
+        <!-- insert our pages at the beginning -->
+        <xpath expr="//page[@name='contact_addresses']" position="before">
+
+          <page name="colpari_settings" string="Settings">
+            <div class="row">
+              <div class="col-12"><group >
+                <!-- FIXME: is this invisible safe or can unsolicited requests still change the client's currency via this? -->
+                <field name="currency_id" string="Currency"/>
+              </group></div>
+            </div>
+
+            <div class="row">
+              <div class="col-12"><group attrs="{'invisible': [('is_colpari_partner', '=', True)]}" >
+                <field name="invoice_per_project" string="Invoice per project" />
+                <field name="aggregate_invoice_positions_by_price_rule" string="Invoice aggregate by price rule"/>
+              </group></div>
+
+              <div class="col-12" attrs="{'invisible': [('is_colpari_partner', '=', False)]}" ><group>
+                <field name="phone_line_number" />
+                <field name="colpari_login_name" />
+                <field name="colpari_partner_email" />
+                <field name="colpari_importID1" />
+                <field name="colpari_importID2" />
+                <field name="colpari_importID3" />
+                <field name="colpari_partner_uid" options="{'format': 0}" />
+              </group></div>
+            </div>
+
+            <div class="row">
+              <div class="">
+                <h3>Associated user accounts:</h3>
+                <field name="user_ids" widget="one2many" mode="tree" readonly="True">
+                  <tree>
+                    <field name="name"/>
+                    <field name="login"/>
+                    <field name="create_date"/>
+                    <field name="login_date"/>
+                    <field name="lang"/>
+                  </tree>
+                </field>
+              </div>
+            </div>
+          </page>
+
+          <page name="partner_project_assignments" string="Services"  attrs="{'invisible': [('is_colpari_partner', '=', False)]}">
+            <field name="partner_project_assignments">
+              <tree editable="top">
+                <field name="project_id"/>
+                <field name="role_ids" widget="many2many_tags" />
+                <field name="write_date" />
+              </tree>
+            </field>
+          </page>
+
+          <page name="client_projects" string="Services" attrs="{'invisible': [('is_colpari_client', '=', False)]}">
+            <field name="client_projects" />
+          </page>
+
+          <page name="colpari_skills" string="Skills" attrs="{'invisible': [('is_colpari_partner', '=', False)]}">
+            <field name="skills" />
+          </page>
+
+          <!-- activities page -->
+          <page name='colpari_activities' string='Activities'>
+            <!-- <group> -->
+              <field name='activities' string='Activities'
+                help="All activities of this partner"/>
+            <!-- </group> -->
+          </page>
+
+          <!-- features page -->
+          <page name='colpari_features' string='Platform features' invisible="1">
+            <h2>Directly assigned feature sets</h2>
+            <group>
+              <field name='colpari_feature_sets' string='Directly assigned feature sets' widget='many2many_checkboxes'/>
+            </group>
+            <br/><br/>
+            <h2>Directly assigned features</h2>
+            <group>
+              <field name='colpari_features' string='Directly assigned features' widget='many2many_checkboxes'/>
+            </group>
+            <br/><br/>
+            <h2>Effective  features</h2>
+            <group>
+              <field name='effective_features' string='Effective features'
+                help="All effective features of this partner" widget='many2many_checkboxes'/>
+            </group>
+          </page>
+
+          <!-- related LDAP mnappings -->
+          <page name="project_ldap_mappings" string="LDAP mappings">
+            <field name="related_ldap_mappings"/>
+          </page>
+
+        </xpath>
+      </field>
+    </record>
+  </data>
+</odoo>
