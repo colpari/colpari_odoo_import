@@ -10,14 +10,14 @@ _logger = logging.getLogger(__name__)
 
 
 class colpariOdooImportSource(models.Model):
-	_name = 'odoo_import_source'
+	_name = 'colpari.odoo_import_source'
 	_description = 'Odoo instance to import data from'
 	_help = 'Access details for an odoo instance to import data from'
 
 
 
 class colpariOdooImport(models.Model):
-	_name = 'odoo_import_config'
+	_name = 'colpari.odoo_import_config'
 	_description = 'Import configuration'
 	_help = 'A configuration to import data from another odoo instance'
 
@@ -46,25 +46,25 @@ class colpariOdooImport(models.Model):
 
 
 class colpariOdooImportModelConfig(models.Model):
-	_name = 'odoo_import_modelconfig'
+	_name = 'colpari.odoo_import_modelconfig'
 	_description = 'Import configuration for a certain model'
 
 	import_config = fields.Many2one('colpari.odoo_import_config', required=True, ondelete='cascade')
 
-	ir_model = fields.Many2one('ir.model', required=True, ondelete='cascade')
+	ir_models = fields.Many2one('ir.model', required=True, ondelete='cascade')
 
-	identity_by_odoo_name = field.Boolean()
+	identity_by_odoo_name = fields.Boolean()
 
-	key_fields = fields.Many2many('ir.model.fields')
+	key_fields = fields.Many2many('ir.model.fields', 'cp_importconfig_keyfields', 'config', 'key_field')
 
-	ignore_fields = fields.Many2many('ir.model.fields')
+	ignore_fields = fields.Many2many('ir.model.fields', 'cp_importconfig_ignorefields', 'config', 'ignore_field')
 
 	strategy = fields.Selection([('ignore', 'Ignore'), ('create', 'Create if not found'), ('update', 'Update if existing, or create')])
 
 
 
 class colpariOdooImportRun(models.Model):
-	_name = 'odoo_import_run'
+	_name = 'colpari.odoo_import_run'
 	_description = 'Import run'
 	_help = 'A run of a specific import configuration'
 
@@ -97,7 +97,7 @@ class colpariOdooImportRun(models.Model):
 			move to state runnable if _checkRunnable()
 		'''
 		self.ensure_one()
-		remoteConnection = self._checkRunnable():
+		remoteConnection = self._checkRunnable()
 		if odooConnection:
 			self.state = 'runnable'
 		return remoteConnection

@@ -25,6 +25,8 @@
     # always loaded
     'data': [
         'security/groups.xml',
+        'views/addView_import_runs.xml',
+        'views/addView_import_configs.xml',
         # 'views/addView_colpari.action_type.xml',
         # 'views/addView_colpari.action_unit.xml',
         # 'views/addView_colpari.activity_value_import_zammad.xml',
@@ -51,7 +53,7 @@
         # 'views/changeForm_res.partner.xml',
         # 'views/changeForm_res_company_ldap.xml',
         # 'views/changeKanban_project.project.xml',
-        # 'views/main_menu.xml',
+        'views/main_menu.xml',
 
         # 'data/uom.uom.csv',
         # 'data/colpari.action_type.csv',

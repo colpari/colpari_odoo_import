@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- import runs list -->
+    <record id="import_runs_tree" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_runs.tree</field>
+      <field name="model">colpari.odoo_import_run</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree limit="120" string="Import runs" delete="0" multi_edit="0" sample="1" expand="true">
+          <field name="import_config"/>
+          <field name="state" class="font-weight-bold"/>
+          <field name="write_uid" class="font-weight-bold"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- import runs search -->
+    <record id="runs_search" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_runs.search</field>
+      <field name="model">colpari.odoo_import_run</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="arch" type="xml">
+        <search string="Import runs">
+          <field name="import_config" />
+          <field name="state" />
+          <field name="write_uid" />
+          <group expand="0" string="Group By">
+              <filter name="state" domain="[]" context="{'group_by': 'state'}"/>
+          </group>
+          <!-- <searchpanel>
+            <field name="parent_project_id" icon="fa-users" select="one" hierarchize="True" enable_counters="True"/>
+            <field name="partner_id" icon="fa-users" enable_counters="1" select="one" hierarchize="true"/>
+          </searchpanel> -->
+        </search>
+      </field>
+    </record>
+
+    <!-- action for import runs list -->
+    <record model="ir.actions.act_window" id="act_import_runs_window">
+      <field name="name">odoo import runs</field>
+      <field name="res_model">colpari.odoo_import_run</field>
+      <field name="view_mode">tree,kanban,form</field>
+      <field name="view_id" ref="import_runs_tree"/> 
+      <field name="search_view_id" ref="runs_search"/>
+    </record>
+  </data>
+</odoo>

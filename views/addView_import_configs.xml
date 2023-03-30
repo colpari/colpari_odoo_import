@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- import configs list -->
+    <record id="import_configs_tree" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_configs.tree</field>
+      <field name="model">colpari.odoo_import_config</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="arch" type="xml">
+        <tree limit="120" string="Import configs" delete="0" multi_edit="0" sample="1" expand="true">
+          <field name="name"/>
+          <field name="model_configs" widget="many2many_tags"/>
+          <field name="write_uid" class="font-weight-bold"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- import configs search -->
+    <record id="configs_search" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_configs.search</field>
+      <field name="model">colpari.odoo_import_config</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="arch" type="xml">
+        <search string="Import configs">
+          <field name="name" />
+          <field name="write_uid" />
+          <!-- <group expand="0" string="Group By">
+              <filter name="state" domain="[]" context="{'group_by': 'state'}"/>
+          </group> -->
+          <!-- <searchpanel>
+            <field name="parent_project_id" icon="fa-users" select="one" hierarchize="True" enable_counters="True"/>
+            <field name="partner_id" icon="fa-users" enable_counters="1" select="one" hierarchize="true"/>
+          </searchpanel> -->
+        </search>
+      </field>
+    </record>
+
+    <!-- action for import runs list -->
+    <record model="ir.actions.act_window" id="act_import_configs_window">
+      <field name="name">odoo import configs</field>
+      <field name="res_model">colpari.odoo_import_config</field>
+      <field name="view_mode">tree,kanban,form</field>
+      <field name="view_id" ref="import_configs_tree"/> 
+      <field name="search_view_id" ref="configs_search"/>
+    </record>
+  </data>
+</odoo>
