@@ -15,5 +15,9 @@
     <menuitem name="Import configs" id="menu_import_configs_window" parent="menu_root"
               action="act_import_configs_window" groups="group_colpari_odoo_import_user" sequence="40"/>
 
+    <!-- import sources menu entry -->
+    <menuitem name="Import sources" id="menu_import_sources_window" parent="menu_root"
+              action="act_import_sources_window" groups="group_colpari_odoo_import_user" sequence="60"/>
+
   </data>
 </odoo>

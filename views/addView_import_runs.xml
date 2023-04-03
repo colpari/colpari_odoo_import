@@ -5,7 +5,7 @@
     <record id="import_runs_tree" model="ir.ui.view">
       <field name="name">colpari.odoo_import_runs.tree</field>
       <field name="model">colpari.odoo_import_run</field>
-      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
       <field name="arch" type="xml">
         <tree limit="120" string="Import runs" delete="0" multi_edit="0" sample="1" expand="true">
           <field name="import_config"/>
@@ -15,11 +15,45 @@
       </field>
     </record>
 
+    <!-- import run messages list -->
+    <record id="import_run_messages_tree" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_runmessages.tree</field>
+      <field name="model">colpari.odoo_import_run_message</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <tree limit="120" string="Import runs" delete="0" multi_edit="0" sample="1" expand="true">
+          <field name="level" class="font-weight-bold"/>
+          <field name="text"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- import runs form -->
+    <record id="import_runs_form" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_runs.form</field>
+      <field name="model">colpari.odoo_import_run</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <group>
+              <field name="import_config"/>
+              <field name="state"/>
+              <button name="prepare" string="Prepare" type="object" class="oe_highlight" />
+              <field name="progress1" widget="progressbar" />
+              <field name="progress2" widget="progressbar" />
+            </group>
+            <field name="messages"/>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
     <!-- import runs search -->
     <record id="runs_search" model="ir.ui.view">
       <field name="name">colpari.odoo_import_runs.search</field>
       <field name="model">colpari.odoo_import_run</field>
-      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
       <field name="arch" type="xml">
         <search string="Import runs">
           <field name="import_config" />
@@ -41,7 +75,7 @@
       <field name="name">odoo import runs</field>
       <field name="res_model">colpari.odoo_import_run</field>
       <field name="view_mode">tree,kanban,form</field>
-      <field name="view_id" ref="import_runs_tree"/> 
+      <field name="view_id" ref="import_runs_tree"/>
       <field name="search_view_id" ref="runs_search"/>
     </record>
   </data>

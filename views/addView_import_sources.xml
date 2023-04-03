@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<odoo>
+  <data>
+    <!-- import sources list -->
+    <record id="import_sources_tree" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_sources.tree</field>
+      <field name="model">colpari.odoo_import_source</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <tree limit="120" string="Import sources" delete="0" multi_edit="0" sample="1" expand="true">
+          <field name="name"/>
+          <field name="url"/>
+          <field name="dbname"/>
+          <field name="username"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- import sources form -->
+    <record id="import_sources_form" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_sources.form</field>
+      <field name="model">colpari.odoo_import_source</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <group>
+              <field name="name"/>
+              <field name="url"/>
+              <field name="dbname"/>
+              <field name="username"/>
+              <field name="credential" password="True"/>
+            </group>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+    <!-- import sources search -->
+    <record id="sources_search" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_sources.search</field>
+      <field name="model">colpari.odoo_import_source</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <search string="Import sources">
+          <field name="name" />
+          <field name="url"/>
+          <field name="dbname"/>
+          <field name="write_uid" />
+          <!-- <group expand="0" string="Group By">
+              <filter name="state" domain="[]" context="{'group_by': 'state'}"/>
+          </group> -->
+          <!-- <searchpanel>
+            <field name="parent_project_id" icon="fa-users" select="one" hierarchize="True" enable_counters="True"/>
+            <field name="partner_id" icon="fa-users" enable_counters="1" select="one" hierarchize="true"/>
+          </searchpanel> -->
+        </search>
+      </field>
+    </record>
+
+    <!-- action for import runs list -->
+    <record model="ir.actions.act_window" id="act_import_sources_window">
+      <field name="name">odoo import sources</field>
+      <field name="res_model">colpari.odoo_import_source</field>
+      <field name="view_mode">tree,kanban,form</field>
+      <field name="view_id" ref="import_sources_tree"/>
+      <field name="search_view_id" ref="sources_search"/>
+    </record>
+  </data>
+</odoo>

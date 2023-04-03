@@ -27,6 +27,7 @@
         'security/groups.xml',
         'views/addView_import_runs.xml',
         'views/addView_import_configs.xml',
+        'views/addView_import_sources.xml',
         # 'views/addView_colpari.action_type.xml',
         # 'views/addView_colpari.action_unit.xml',
         # 'views/addView_colpari.activity_value_import_zammad.xml',

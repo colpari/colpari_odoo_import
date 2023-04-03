@@ -14,6 +14,35 @@ class colpariOdooImportSource(models.Model):
 	_description = 'Odoo instance to import data from'
 	_help = 'Access details for an odoo instance to import data from'
 
+	name 		= fields.Char()
+	url 		= fields.Char()
+	username 	= fields.Char()
+	dbname 		= fields.Char()
+	credential 	= fields.Char()
+
+class ConfigCache():
+	def __init__(self, importConfig):
+		self.config = importConfig
+		self._configCache = CC = {}
+		_logger.info("{} building config cache".format(importConfig))
+		for modelConfig in importConfig.model_configs:
+			CC[modelConfig.import_model.model] = {
+				'config' : modelConfig,
+				'fields' : {
+					fieldConfig.import_field.name : fieldConfig
+						for fieldConfig in modelConfig.field_configs
+				}
+			}
+
+	def getModelConfig(self, modelName):
+		return self._configCache.setdefault(modelName, {})
+
+	def getFieldConfig(self, modelName, fieldName):
+		return self.getModelConfig(modelName).setdefault('fields', {}).setdefault(fieldName, {})
+
+	def shallImportField(self, modelName, fieldName):
+		#TODO: complete
+		return self.getFieldConfig(modelName, fieldName)
 
 
 class colpariOdooImport(models.Model):
@@ -25,96 +54,83 @@ class colpariOdooImport(models.Model):
 
 	model_configs = fields.One2many('colpari.odoo_import_modelconfig', 'import_config')
 
+	import_source = fields.Many2one('colpari.odoo_import_source', required=True, ondelete='restrict')
 
-	def execute(self):
+	def _getCC(self):
 		self.ensure_one()
-
-		# models check
-			# for model_configs
-				# read remote model
-				# warn about locally missing fields
-					# for non-ignored field:
-						# fail if locally required and not configured
-
-		# import
-			# build dependency graph
-			# for graph.leafes
-				# import or die
-
-
-
+		return ConfigCache(self)
 
 
 class colpariOdooImportModelConfig(models.Model):
 	_name = 'colpari.odoo_import_modelconfig'
 	_description = 'Import configuration for a certain model'
 
-	import_config = fields.Many2one('colpari.odoo_import_config', required=True, ondelete='cascade')
+	_sql_constraints = [(
+		'model_config_uniq', 'unique(import_config, import_model)',
+		'Multiple configurations for the same model in one import configuration are not allowed'
+	)]
 
-	ir_models = fields.Many2one('ir.model', required=True, ondelete='cascade')
-
-	identity_by_odoo_name = fields.Boolean()
-
-	key_fields = fields.Many2many('ir.model.fields', 'cp_importconfig_keyfields', 'config', 'key_field')
-
-	ignore_fields = fields.Many2many('ir.model.fields', 'cp_importconfig_ignorefields', 'config', 'ignore_field')
-
-	strategy = fields.Selection([('ignore', 'Ignore'), ('create', 'Create if not found'), ('update', 'Update if existing, or create')])
-
-
-
-class colpariOdooImportRun(models.Model):
-	_name = 'colpari.odoo_import_run'
-	_description = 'Import run'
-	_help = 'A run of a specific import configuration'
+	name = fields.Char(compute="_computeName")
+	def _computeName(self):
+		for record in self:
+			record.name = record.import_model and record.import_model.name or ''
 
 	import_config = fields.Many2one('colpari.odoo_import_config', required=True, ondelete='cascade')
 
-	state = fields.Selection([('configure', 'Configure'), ('runnable', 'Runnable'), ('running', 'Running'), ('finished', 'Finished'), ('failed', 'Failed')], default='configure')
+	import_model = fields.Many2one('ir.model', required=True, ondelete='cascade')
+
+	model_import_strategy = fields.Selection([
+		('ignore'		, 'Ignore'),
+		('full'			, 'Create or update'),
+		('create'		, 'Create only (if not found)'),
+		('updateOnly'	, 'Update if existing'),
+	], default='full', required=True)
+
+	matching_strategy = fields.Selection([
+		('odooName'		, 'Match by odoo name'),
+		('explicitKeys'	, 'Match by configured key fields')
+	], default='odooName', required=True)
+
+	field_configs = fields.One2many('colpari.odoo_import_fieldconfig', 'model_config')
 
 
-	def _checkRunnable(self):
-		'''
-			connect to remote and verify models. move to state runnable if successful.
-			for efficiency reasons we return the remote connection we have to make anyways, since we might be part of a _run()
-		'''
-		self.ensure_one()
-		# create connection
-		# for my config's model_configs
-			# read remote model
-			# for local field:
-				# if locally required:
-					# fail if missing on remote
-					# fail if ignored
-				# if object-type and not ignored:
-					# fail if not configured
+class colpariOdooImportFieldConfig(models.Model):
+	_name = 'colpari.odoo_import_fieldconfig'
+	_description = 'Import configuration for a certain model field'
 
-		# return odoo connection
+	_sql_constraints = [(
+		'field_config_uniq', 'unique(model_config, import_field)',
+		'Multiple configurations for the same field in one import model configuration are not allowed'
+	)]
 
+	name = fields.Char(compute="_computeName")
+	def _computeName(self):
+		for record in self:
+			record.name = record.import_field and record.import_field.name or ''
 
-	def _prepare(self):
-		'''
-			move to state runnable if _checkRunnable()
-		'''
-		self.ensure_one()
-		remoteConnection = self._checkRunnable()
-		if odooConnection:
-			self.state = 'runnable'
-		return remoteConnection
+	model_config = fields.Many2one('colpari.odoo_import_modelconfig', required=True, ondelete='cascade')
 
-	def _run(self):
-		''' _prepare() if runnable, read remote data '''
-		self.ensure_one()
-		
-		odooConnection = self._prepare()
+	model_id = fields.Many2one('ir.model', related='model_config.import_model')
+	import_field = fields.Many2one('ir.model.fields', required=True, ondelete='cascade', domain="[('model_id', '=', model_id)]")
 
-		if not odooConnection:
-			return None
-			# FIXME: raise something?
+	field_import_strategy = fields.Selection([
+		('literal'		, 'Literal value'),
+		('ignore'		, 'Ignore field'),
+		('explicitKey'	, 'Part of the explicit matching key')
+	], default='full', required=True)
+
+	value_mappings = fields.One2many('colpari.odoo_import_fieldmapping', 'field_config')
 
 
-		# theorectically looks good
-		# build local dependency graph
-		# for graph.leafes
-			# import or die
+
+class colpariOdooImportFieldMapping(models.Model):
+	_name = 'colpari.odoo_import_fieldmapping'
+	_description = 'Value mapping for importing a certain model field'
+
+
+	field_config = fields.Many2one('colpari.odoo_import_fieldconfig')
+
+	local_value = fields.Char(required=True)
+
+	remote_value = fields.Char(required=True)
 

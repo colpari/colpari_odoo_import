@@ -5,21 +5,94 @@
     <record id="import_configs_tree" model="ir.ui.view">
       <field name="name">colpari.odoo_import_configs.tree</field>
       <field name="model">colpari.odoo_import_config</field>
-      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
       <field name="arch" type="xml">
         <tree limit="120" string="Import configs" delete="0" multi_edit="0" sample="1" expand="true">
           <field name="name"/>
-          <field name="model_configs" widget="many2many_tags"/>
+          <field name="import_source"/>
           <field name="write_uid" class="font-weight-bold"/>
+          <field name="model_configs" widget="many2many_tags"/>
         </tree>
       </field>
     </record>
+
+
+    <!-- import configs form -->
+    <record id="import_configs_form" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_configs.form</field>
+      <field name="model">colpari.odoo_import_config</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <group>
+              <field name="name"/>
+              <field name="import_source"/>
+            </group>
+            <field name="model_configs"/>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+
+    <!-- import modelconfigs form -->
+    <record id="import_modelconfigs_form" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_modelconfigs.form</field>
+      <field name="model">colpari.odoo_import_modelconfig</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <group>
+              <field name="import_model"/>
+              <field name="model_import_strategy"/>
+              <field name="matching_strategy"/>
+            </group>
+              <field name="field_configs">
+                <tree>
+                  <field name="name"/>
+                  <field name="field_import_strategy"/>
+                  <field name="value_mappings"/>
+                </tree>
+              </field>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
+
+    <!-- import fieldconfigs form -->
+    <record id="import_fieldconfigs_form" model="ir.ui.view">
+      <field name="name">colpari.odoo_import_fieldconfigs.form</field>
+      <field name="model">colpari.odoo_import_fieldconfig</field>
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
+      <field name="arch" type="xml">
+        <form>
+          <sheet>
+            <group>
+              <field name="model_id" invisible="1" />
+
+              <field name="import_field"/>
+              <field name="field_import_strategy"/>
+            </group>
+            <field name="value_mappings">
+              <tree>
+                <field name="remote_value"/>
+                <field name="local_value"/>
+              </tree>
+            </field>
+          </sheet>
+        </form>
+      </field>
+    </record>
+
 
     <!-- import configs search -->
     <record id="configs_search" model="ir.ui.view">
       <field name="name">colpari.odoo_import_configs.search</field>
       <field name="model">colpari.odoo_import_config</field>
-      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>      
+      <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
       <field name="arch" type="xml">
         <search string="Import configs">
           <field name="name" />
@@ -40,7 +113,7 @@
       <field name="name">odoo import configs</field>
       <field name="res_model">colpari.odoo_import_config</field>
       <field name="view_mode">tree,kanban,form</field>
-      <field name="view_id" ref="import_configs_tree"/> 
+      <field name="view_id" ref="import_configs_tree"/>
       <field name="search_view_id" ref="configs_search"/>
     </record>
   </data>
