@@ -34,15 +34,25 @@ class ConfigCache():
 				}
 			}
 
+	def _getModelEntry(self, modelName):
+		return self._configCache.get(modelName, {})
+
 	def getModelConfig(self, modelName):
-		return self._configCache.setdefault(modelName, {})
+		return self._getModelEntry(modelName).get('config', None)
 
 	def getFieldConfig(self, modelName, fieldName):
-		return self.getModelConfig(modelName).setdefault('fields', {}).setdefault(fieldName, {})
+		me = self._getModelEntry(modelName)
+		if me:
+			return me.setdefault('fields', {}).get(fieldName, None)
 
-	def shallImportField(self, modelName, fieldName):
-		#TODO: complete
-		return self.getFieldConfig(modelName, fieldName)
+	def isModelIgnored(self, modelName):
+		mc = self.getModelConfig(modelName)
+		return mc and mc.model_import_strategy == 'ignore'
+
+	def isFieldIgnored(self, modelName, fieldName):
+		fc = self.getFieldConfig(modelName, fieldName)
+		return fc and fc.field_import_strategy == 'ignore'
+
 
 
 class colpariOdooImport(models.Model):
@@ -117,9 +127,16 @@ class colpariOdooImportFieldConfig(models.Model):
 		('literal'		, 'Literal value'),
 		('ignore'		, 'Ignore field'),
 		('explicitKey'	, 'Part of the explicit matching key')
-	], default='full', required=True)
+	], default='literal', required=True)
 
 	value_mappings = fields.One2many('colpari.odoo_import_fieldmapping', 'field_config')
+
+	def mapsToDefaultValue(self):
+		self.ensure_one()
+		if len(self.value_mappings) == 1 and not self.value_mappings[0].remote_value:
+			return self.value_mappings[0].local_value
+		else:
+			return None
 
 
 
@@ -127,10 +144,17 @@ class colpariOdooImportFieldMapping(models.Model):
 	_name = 'colpari.odoo_import_fieldmapping'
 	_description = 'Value mapping for importing a certain model field'
 
-
-	field_config = fields.Many2one('colpari.odoo_import_fieldconfig')
+	field_config = fields.Many2one('colpari.odoo_import_fieldconfig', readonly=True)
 
 	local_value = fields.Char(required=True)
 
-	remote_value = fields.Char(required=True)
+	remote_value = fields.Char(required=False)
+
+	name = fields.Char(compute='_computeName')
+	def _computeName(self):
+		for record in self:
+			record.name = (
+					("'{}' ".format(record.remote_value) if record.remote_value else '')
+				+	"=> '{}'".format(record.local_value)
+			)
 

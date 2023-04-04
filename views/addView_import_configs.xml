@@ -29,7 +29,13 @@
               <field name="name"/>
               <field name="import_source"/>
             </group>
-            <field name="model_configs"/>
+            <field name="model_configs">
+              <tree>
+                <field name="import_model"/>
+                <field name="model_import_strategy"/>
+                <field name="matching_strategy"/>
+              </tree>
+            </field>
           </sheet>
         </form>
       </field>
@@ -53,7 +59,7 @@
                 <tree>
                   <field name="name"/>
                   <field name="field_import_strategy"/>
-                  <field name="value_mappings"/>
+                  <field name="value_mappings" widget="many2many_tags"/>
                 </tree>
               </field>
           </sheet>
@@ -76,7 +82,7 @@
               <field name="import_field"/>
               <field name="field_import_strategy"/>
             </group>
-            <field name="value_mappings">
+            <field name="value_mappings" context="{'default_field_config' : id}">
               <tree>
                 <field name="remote_value"/>
                 <field name="local_value"/>
