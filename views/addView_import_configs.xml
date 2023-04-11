@@ -28,12 +28,17 @@
             <group>
               <field name="name"/>
               <field name="import_source"/>
+              <field name="only_required_dependencies"/>
             </group>
             <field name="model_configs">
               <tree>
                 <field name="import_model"/>
+                <field name="import_model_name"/>
                 <field name="model_import_strategy"/>
                 <field name="matching_strategy"/>
+                <field name="do_update"/>
+                <field name="do_create"/>
+                <field name="only_required_dependencies"/>
               </tree>
             </field>
           </sheet>
@@ -54,6 +59,9 @@
               <field name="import_model"/>
               <field name="model_import_strategy"/>
               <field name="matching_strategy"/>
+              <field name="only_required_dependencies"/>
+              <field name="do_update"/>
+              <field name="do_create"/>
             </group>
               <field name="field_configs">
                 <tree>
