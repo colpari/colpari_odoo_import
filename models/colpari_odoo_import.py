@@ -21,6 +21,7 @@ class colpariOdooImportSource(models.Model):
 	credential 	= fields.Char()
 
 class ConfigCache():
+	''' TODO: this should maybe be part of the ImportContext class '''
 	def __init__(self, importConfig):
 		self.config = importConfig
 		self._configCache = CC = {}
@@ -49,9 +50,21 @@ class ConfigCache():
 		mc = self.getModelConfig(modelName)
 		return mc and mc.model_import_strategy == 'ignore'
 
+	def isModelImported(self, modelName):
+		mc = self.getModelConfig(modelName)
+		return mc and mc.model_import_strategy in ('full', 'create', 'updateOnly')
+
 	def isFieldIgnored(self, modelName, fieldName):
 		fc = self.getFieldConfig(modelName, fieldName)
 		return fc and fc.field_import_strategy == 'ignore'
+
+	def getImportStrategy(self, modelName, fieldName):
+		if not self.isModelImported(modelName):
+			return 'ignore'
+		fc = self.getFieldConfig(modelName, fieldName)
+		# unconfigured fields default to being imported
+		return fc and fc.field_import_strategy or 'import'
+
 
 
 
@@ -69,6 +82,7 @@ class colpariOdooImport(models.Model):
 	def _getCC(self):
 		self.ensure_one()
 		return ConfigCache(self)
+
 
 
 class colpariOdooImportModelConfig(models.Model):
@@ -89,12 +103,16 @@ class colpariOdooImportModelConfig(models.Model):
 
 	import_model = fields.Many2one('ir.model', required=True, ondelete='cascade')
 
+	do_create = fields.Boolean(string="Create objects if not found locally")
+	do_update = fields.Boolean(string="Update objects if found locally")
+
+	#TODO: add remote consideration domain
+
 	model_import_strategy = fields.Selection([
-		('ignore'		, 'Ignore'),
-		('full'			, 'Create or update'),
-		('create'		, 'Create only (if not found)'),
-		('updateOnly'	, 'Update if existing'),
-	], default='full', required=True)
+		('import'	, 'Create or update'),
+		('match'	, 'Do not import but configure matching'),
+		('ignore'	, 'Ignore (do not import or match)'),
+	], default='import', required=True)
 
 	matching_strategy = fields.Selection([
 		('odooName'		, 'Match by odoo name'),
@@ -102,6 +120,13 @@ class colpariOdooImportModelConfig(models.Model):
 	], default='odooName', required=True)
 
 	field_configs = fields.One2many('colpari.odoo_import_fieldconfig', 'model_config')
+
+	def getConfiguredKeyFields(self):
+		self.ensure_one()
+		return self.field_configs.filtered(lambda fc : fc.field_import_strategy == 'key')
+
+	def getConfiguredKeyFieldNames(self):
+		return set(self.getConfiguredKeyFields().mapped('import_field.name'))
 
 
 class colpariOdooImportFieldConfig(models.Model):
@@ -121,17 +146,19 @@ class colpariOdooImportFieldConfig(models.Model):
 	model_config = fields.Many2one('colpari.odoo_import_modelconfig', required=True, ondelete='cascade')
 
 	model_id = fields.Many2one('ir.model', related='model_config.import_model')
+
 	import_field = fields.Many2one('ir.model.fields', required=True, ondelete='cascade', domain="[('model_id', '=', model_id)]")
 
 	field_import_strategy = fields.Selection([
-		('literal'		, 'Literal value'),
-		('ignore'		, 'Ignore field'),
-		('explicitKey'	, 'Part of the explicit matching key')
-	], default='literal', required=True)
+		('import'	, 'Import the value'),
+		('ignore'	, 'Ignore field'),
+		('key'		, 'Use as (part of) custom key')
+	], default='import', required=True)
 
 	value_mappings = fields.One2many('colpari.odoo_import_fieldmapping', 'field_config')
 
 	def mapsToDefaultValue(self):
+		''' returns the local value to map to iff there is exactly one mapping with an empty remote value '''
 		self.ensure_one()
 		if len(self.value_mappings) == 1 and not self.value_mappings[0].remote_value:
 			return self.value_mappings[0].local_value
