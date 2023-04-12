@@ -25,6 +25,16 @@
           <field name="write_date" string="Time"/>
           <field name="level" class="font-weight-bold"/>
           <field name="text"/>
+          <button
+            name="actionIgnoreField" type="object" string="Ignore field"
+            attrs="{'invisible': [('field_name', '==', False)]}"
+          />
+          <button
+            name="actionIgnoreRelatedType" type="object" string="Ignore type"
+            attrs="{'invisible': [('dependency_type', '==', False)]}"
+          />
+          <field name="field_name" invisible="1" />
+          <field name="dependency_type" invisible="1" />
         </tree>
       </field>
     </record>

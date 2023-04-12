@@ -17,7 +17,8 @@ _logLevelMap = {
 }
 
 class ImportException(Exception):
-	def __init__(self, message):
+	def __init__(self, message, **kwargs):
+		self.kwargs = kwargs
 		super(ImportException, self).__init__(message)
 
 class OdooConnection():
@@ -167,7 +168,13 @@ class ImportContext():
 
 		fc = self.getFieldConfig(modelName, fieldName)
 		required = localField.get('required')
-		#_logger.info("FOLLOW? {}.{} -> {}, {}, {}".format(modelName, fieldName, relatedType, fc, required))
+		_type = localField.get('type')
+		_logger.info("FOLLOW? {}.{} -> {}, {}, {}, {}".format(modelName, fieldName, _type, relatedType, fc, required))
+
+		if _type == 'one2many':
+			# always follow one2many
+			return relatedType
+
 		if not required:
 			if self.importConfig.only_required_dependencies or mc.only_required_dependencies:
 				return False
@@ -271,7 +278,7 @@ class ImportContext():
 		dependencyIdsToResolve = {} # dependencies of imported objects that need to be resolved
 		idsCreatedLater = {} # ids which are ok to be unresolved because we create these objects later
 
-		# read remote keys of all types we want to create or update
+		# read remote keys of all main import types
 		for modelConfig in self.importConfig.model_configs:
 			modelName = modelConfig.import_model.model
 			if self.getImportStrategy(modelName) != 'import':
@@ -306,8 +313,12 @@ class ImportContext():
 					if not relatedType:
 						continue
 
-					if relatedType not in dependencyIdsToResolve:
-						self.log('info', "{} : following dependency {} -> {}".format(modelName, relationFieldName, relatedType))
+					#if relatedType not in dependencyIdsToResolve:
+					if self.getImportStrategy(relatedType) != 'import':
+						self.log(
+							'info', "{} : following dependency {} -> {}".format(modelName, relationFieldName, relatedType),
+							modelName = modelName, fieldName = relationFieldName, dependencyType = relatedType
+						)
 
 					dependencyIds = dependencyIdsToResolve.setdefault(relatedType, set())
 					isMany2One = relationField['type'] == 'many2one'
@@ -325,9 +336,15 @@ class ImportContext():
 			if failingIds:
 				# we have unresolved ids which will also not be created later
 				keyMap = self.keyMaps[modelName]
-				raise ImportException("{} remote records of type {} could not be resolved locally:\n{}".format(
-					len(failingIds), modelName, "\n".join(map(lambda _id: str(keyMap[_id]['remoteKeys']), list(failingIds)[:30]))
-				))
+				raise ImportException(
+					"{} remote records of type {} could not be resolved locally:\n{}".format(
+						len(failingIds), modelName,
+						# list the remoteKeys info for at most 30 of the failing ids
+						"\n".join(map(lambda _id: str(keyMap[_id]['remoteKeys']), list(failingIds)[:30]))
+					),
+					# kwargs for log entry
+					dependencyType = modelName
+				)
 
 		# read match data for all dependency-only types with ids
 		# resolve all keys for all dependency-only types
@@ -354,6 +371,7 @@ class ImportContext():
 				))
 
 			#TODO: also check for empty key field values?
+			#TODO: issue warning if multiple remote keys map to the same local key
 
 			if strategy == 'odooName':
 				localEntry = theEnv.name_search(remoteKeys['display_name'], operator = '=')
@@ -488,6 +506,34 @@ class colpariOdooImportRunMessage(models.Model):
 	level = fields.Selection([('debug', 'Debug'), ('info', 'Info'), ('warning', 'Warning'), ('error', 'Error')], default='configure')
 	text = fields.Char()
 
+	model_name = fields.Char()
+	field_name = fields.Char()
+	dependency_type = fields.Char()
+
+	def actionIgnoreRelatedType(self):
+		self.ensure_one()
+		if not self.dependency_type:
+			raise ValidationError("Action not applicable")
+
+		self.import_run.import_config.setModelConfig(
+			self.dependency_type, {'model_import_strategy' : 'ignore'}
+		)
+
+		self.dependency_type = False # disable action / hide button
+
+	def actionIgnoreField(self):
+		self.ensure_one()
+		if not (self.model_name and self.field_name):
+			raise ValidationError("Action not applicable")
+		config 	= self.import_run.import_config
+		mc 		= config.getModelConfig(self.model_name)
+		if not mc:
+			raise ValidationError("Model is not configured in import config - not adding field settings.")
+
+		mc.setFieldconfig(self.field_name, {'field_import_strategy' : 'ignore'})
+
+		self.field_name = False # disable action / hide button
+
 
 class colpariOdooImportRun(models.Model):
 	_name = 'colpari.odoo_import_run'
@@ -506,10 +552,13 @@ class colpariOdooImportRun(models.Model):
 
 	messages = fields.One2many('colpari.odoo_import_run_message', 'import_run', readonly=True)
 
-	def _log(self, level, text):
+	def _log(self, level, text, modelName=False, fieldName=False, dependencyType=False):
 		self.ensure_one()
 		_logger.log(_logLevelMap[level], text)
-		self.messages.create([{'level':level, 'text':text, 'import_run':self.id}])
+		self.messages.create([{
+			'level' : level, 'text' : text, 'import_run' : self.id,
+			'model_name' : modelName, 'field_name' : fieldName, 'dependency_type' : dependencyType
+		}])
 
 	def prepare(self):
 		self.ensure_one()
@@ -523,7 +572,7 @@ class colpariOdooImportRun(models.Model):
 			theImport.doMatching()
 
 		except ImportException as ie:
-			self._log('error', str(ie))
+			self._log('error', str(ie), **ie.kwargs)
 			self.state = 'failed'
 
 		except Exception as e:

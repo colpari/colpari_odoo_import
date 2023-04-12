@@ -34,6 +34,27 @@ class colpariOdooImport(models.Model):
 
 	only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=True)
 
+	def getModelConfig(self, modelName):
+		self.ensure_one()
+		result = self.model_configs.filtered(lambda r: r.import_model_name == modelName)
+		if len(result) < 1:
+			return None
+		if len(result) > 1:
+			raise ValidationError("Multiple configs for model name '{}' in {}? ({})".format(modelName, self, result))
+		return result
+
+	def setModelConfig(self, modelName, values = {}):
+		mc = self.getModelConfig(modelName)
+		if not mc:
+			irModel = self.env['ir.model'].search([['model', '=', modelName]])
+			if len(irModel) != 1:
+				raise ValidationError("None or multiple matches while searching for model '{}'".format(modelName))
+			values.update({'import_config': self.id, 'import_model' : irModel.id})
+			mc = self.model_configs.create([values])
+			_logger.info("created model config {}".format(mc))
+		else:
+			mc.update(values)
+		return mc
 
 class colpariOdooImportModelConfig(models.Model):
 	_name = 'colpari.odoo_import_modelconfig'
@@ -71,10 +92,34 @@ class colpariOdooImportModelConfig(models.Model):
 
 	matching_strategy = fields.Selection([
 		('odooName'		, 'Match by odoo name'),
-		('explicitKeys'	, 'Match by configured key fields')
+		('explicitKeys'	, 'Match by configured key fields'),
 	], default='odooName', required=True)
 
 	field_configs = fields.One2many('colpari.odoo_import_fieldconfig', 'model_config')
+
+	def getFieldConfig(self, fieldName):
+		self.ensure_one()
+		result = self.field_configs.filtered(lambda r: r.name == fieldName)
+		if len(result) < 1:
+			return None
+		if len(result) > 1:
+			raise ValidationError("Multiple configs for field name '{}' in {}? ({})".format(fieldName, self, result))
+		return result
+
+	def setFieldConfig(self, fieldName, values = {}):
+		self.ensure_one()
+		fc = self.getFieldConfig(fieldName)
+
+		if not fc:
+			irField = self.env['ir.model.fields'].search([['model_id', '=', self.import_model.id], ['name', '=', fieldName]])
+			if len(irField) != 1:
+				raise ValidationError("None or multiple matches while searching for field '{}.{}'".format(self.import_model.model, fieldName))
+			values.update({'model_config': self.id, 'import_field' : irField.id})
+			fc = self.field_configs.create([values])
+			_logger.info("created field config {}".format(fc))
+
+		return fc
+
 
 	def getConfiguredKeyFields(self):
 		self.ensure_one()
@@ -93,10 +138,14 @@ class colpariOdooImportFieldConfig(models.Model):
 		'Multiple configurations for the same field in one import model configuration are not allowed'
 	)]
 
-	name = fields.Char(compute="_computeName")
+	name = fields.Char(related="import_field.name")
 	def _computeName(self):
 		for record in self:
 			record.name = record.import_field and record.import_field.name or ''
+	# name = fields.Char(compute="_computeName")
+	# def _computeName(self):
+	# 	for record in self:
+	# 		record.name = record.import_field and record.import_field.name or ''
 
 	model_config = fields.Many2one('colpari.odoo_import_modelconfig', required=True, ondelete='cascade')
 
