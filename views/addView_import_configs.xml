@@ -30,6 +30,7 @@
               <field name="import_source"/>
               <field name="only_required_dependencies"/>
             </group>
+            <h5>Models without configuration are treated as import_strategy = match, matching_strategy = odooName</h5>
             <field name="model_configs">
               <tree>
                 <field name="import_model"/>

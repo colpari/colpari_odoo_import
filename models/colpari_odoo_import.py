@@ -85,9 +85,10 @@ class colpariOdooImportModelConfig(models.Model):
 	#TODO: add remote consideration domain
 
 	model_import_strategy = fields.Selection([
-		('import'	, 'Create or update'),
-		('match'	, 'Do not import but explicitly configure matching'),
-		('ignore'	, 'Ignore (do not import or match)'),
+		('import'		, 'Create or update records'),
+		('dependency'	, 'As dependency data'),
+		('match'		, 'Do not import but explicitly configure matching'),
+		('ignore'		, 'Ignore (do not import or match)'),
 	], default='import', required=True)
 
 	matching_strategy = fields.Selection([

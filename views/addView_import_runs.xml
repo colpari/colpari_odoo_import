@@ -30,6 +30,14 @@
             attrs="{'invisible': [('field_name', '==', False)]}"
           />
           <button
+            name="actionImportAsDependency" type="object" string="-> Dependency"
+            attrs="{'invisible': ['|', ('dependency_type', '==', False), ('field_name', '!=', False)]}"
+          />
+          <button
+            name="actionImportFull" type="object" string="-> Import"
+            attrs="{'invisible': ['|', ('dependency_type', '==', False), ('field_name', '!=', False)]}"
+          />
+          <button
             name="actionIgnoreRelatedType" type="object" string="Ignore type"
             attrs="{'invisible': [('dependency_type', '==', False)]}"
           />
