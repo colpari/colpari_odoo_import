@@ -24,6 +24,7 @@
         <tree limit="120" string="Import runs" delete="0" multi_edit="0" sample="1" expand="true">
           <field name="write_date" string="Time"/>
           <field name="level" class="font-weight-bold"/>
+          <field name="model_name" class="font-weight-bold"/>
           <field name="text"/>
           <button
             name="actionIgnoreField" type="object" string="Ignore field"

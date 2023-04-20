@@ -10,10 +10,10 @@ import traceback
 
 _logger = logging.getLogger(__name__)
 _logLevelMap = {
-	'debug' 	: logging.DEBUG,
-	'info' 		: logging.INFO,
-	'warning' 	: logging.WARNING,
-	'error' 	: logging.ERROR,
+	'3_debug' 	: logging.DEBUG,
+	'2_info' 	: logging.INFO,
+	'1_warning'	: logging.WARNING,
+	'0_error' 	: logging.ERROR,
 }
 
 class ImportException(Exception):
@@ -46,7 +46,7 @@ class OdooConnection():
 			self._fieldInfo[modelName] = self.modelCall(modelName, 'fields_get')
 		return self._fieldInfo[modelName]
 
-	def readData(self, modelName, fieldsToRead, ids = None):
+	def readData(self, modelName, fieldsToRead, _logFn, ids = None):
 		''' read all objects or specific ids of a type '''
 		specificIds = ids != None
 		result = (
@@ -54,9 +54,10 @@ class OdooConnection():
 				if ids != None else
 			self.modelCall(modelName, 'search_read', [], fields = list(fieldsToRead))
 		)
-		_logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
-			len(result), modelName, len(ids or []), len(fieldsToRead)
-		))
+		_logFn('3_debug', "readData() : read {} remote {} records with {} ids given and {} fields".format(
+				len(result), modelName, len(ids or []), len(fieldsToRead)
+			), modelName=modelName
+		)
 		return result
 
 
@@ -105,6 +106,16 @@ class ImportContext():
 			#		'remoteKeys' 	: { k :v, k :v }
 			#		'localId'		: idOrNone
 			#	}
+			# }
+		}
+
+		self.importState = {
+			# modelName : {
+			#	'unresolvedIds' : { remoteId, remoteId, remoteId... },
+			#   'keyMaterial'	: { remoteId : { k :v, k :v... }}
+			#	'resolvedIds'	: { remoteId : localId }
+			#	'toCreate'		: { remoteId : { k :v, k :v... } }
+			#	'toUpdate'		: { remoteId : { k :v, k :v... } }
 			# }
 		}
 
@@ -170,7 +181,7 @@ class ImportContext():
 		fc = self.getFieldConfig(modelName, fieldName)
 		required = localField.get('required')
 		_type = localField.get('type')
-		_logger.info("FOLLOW? {}.{} -> {}, {}, {}, {}".format(modelName, fieldName, _type, relatedType, fc, required))
+		#_logger.info("FOLLOW? {}.{} -> {}, {}, {}, {}".format(modelName, fieldName, _type, relatedType, fc, required))
 
 		if _type == 'one2many':
 			# always follow one2many TODO: ?? sure/configurable ??
@@ -244,8 +255,8 @@ class ImportContext():
 			# read remote model
 			remoteFields = self.getRemoteFields(modelName)
 			localFields = self.getLocalFields(modelName)
-			msg = "{} checking {}/{} local/remote fields".format(modelName, len(localFields), len(remoteFields))
-			self.log('debug', msg)
+			msg = "checking {}/{} local/remote fields".format(len(localFields), len(remoteFields))
+			self.log('3_debug', msg, modelName=modelName)
 
 			# determine which fields to import
 			fieldsToImport = self.getFieldNamesToImport(modelName)
@@ -279,7 +290,7 @@ class ImportContext():
 
 			unimportedFields = set(localFields.keys()) - fieldsToImport
 			if unimportedFields:
-				self.log('debug', "{} unimported fields : {}".format(modelName, unimportedFields))
+				self.log('3_debug', "unimported fields : {}".format(unimportedFields), modelName=modelName)
 
 
 	def doMatching(self):
@@ -327,10 +338,6 @@ class ImportContext():
 			if modelConfig.do_update:
 				idsToImport.update(resolvedIds)
 
-			self.log('info', "{} : will read {} remote records and possibly create/update {}/{}".format(
-				modelName, len(idsToImport), len(unresolvedIds), len(resolvedIds)
-			))
-
 			if idsToImport:
 				self._readRemoteDataAndDepenencies(modelName, idsToImport, dependencyIdsToResolve)
 
@@ -342,6 +349,8 @@ class ImportContext():
 			dependencyIdsToResolve = {}
 
 			for modelName, dependencyIds in thisPass.items():
+				if not dependencyIds: # sanity check
+					raise Exception("Empty dependency list")
 				iStrategy = self.getImportStrategy(modelName)
 				if iStrategy == 'ignore':
 					raise Exception("Import strategy for {} should not be 'ignore' here".format(modelName))
@@ -351,7 +360,7 @@ class ImportContext():
 					(resolvedIds, unresolvedIds) = self._resolve(modelName)
 
 				elif iStrategy == 'dependency':
-					self._readRemoteDataAndDepenencies(modelName, idsToImport, dependencyIdsToResolve)
+					self._readRemoteDataAndDepenencies(modelName, dependencyIds, dependencyIdsToResolve)
 
 
 				elif iStrategy == 'match':
@@ -367,7 +376,7 @@ class ImportContext():
 								"\n".join(map(lambda _id: str(keyMap[_id]['remoteKeys']), list(unresolvedIds)[:30]))
 							),
 							# kwargs for log entry
-							dependencyType = modelName
+							modelName = modelName
 						)
 				else:
 					raise Exception("Unhandled model import strategy '{}' for {}".format(iStrategy, modelName))
@@ -380,6 +389,8 @@ class ImportContext():
 	def _readRemoteDataAndDepenencies(self, modelName, remoteIds, existingData = {}):
 		# fetch remote data
 		remoteData = self._readRemoteData(modelName, remoteIds)
+		if not remoteData:
+			return existingData
 
 		fieldsToImport = self.getFieldNamesToImport(modelName)
 
@@ -393,18 +404,21 @@ class ImportContext():
 				continue
 
 			if self.getImportStrategy(relatedType) not in ('import', 'dependency'):
-				self.log(
-					'info', "{} : following dependency {} -> {}".format(modelName, relationFieldName, relatedType),
+				self.log( # log message if type is not 
+					'2_info', "following dependency {} -> {}".format(relationFieldName, relatedType),
 					modelName = modelName, fieldName = relationFieldName, dependencyType = relatedType
 				)
 
-			dependencyIds = existingData.setdefault(relatedType, set())
+			dependencyIds = set()
 			isMany2One = relationField['type'] == 'many2one'
 			for remoteId in filter(None, map(lambda remoteDict : remoteDict[relationFieldName], remoteData.values())):
 				if isMany2One:
 					dependencyIds.add(remoteId[0])
 				else:
 					dependencyIds.update(remoteId)
+
+			if dependencyIds:
+				 existingData.setdefault(relatedType, set()).update(dependencyIds)
 
 		return existingData
 
@@ -423,7 +437,7 @@ class ImportContext():
 				continue # already resolved
 
 			if iStrategy == 'dependency':
-				# dependency data is resolved (and data['localid'] is set) elsewhere
+				# dependency data not resolved but created (and data['localId'] is set elsewhere)
 				unresolvedIds.add(remoteId)
 				continue
 
@@ -482,7 +496,7 @@ class ImportContext():
 							localEntry, modelName, remoteId ,remoteKeys
 					))
 
-		_logger.info("_resolve({}) +{} -{}".format(modelName, len(resolvedIds), len(unresolvedIds)))
+		self.log('3_debug', "resolve +{} -{}".format(len(resolvedIds), len(unresolvedIds)), modelName=modelName)
 		return (resolvedIds, unresolvedIds)
 
 	def _fetchRemoteKeys(self, modelName, ids = None): #TODO: add remote consideration domain
@@ -498,7 +512,7 @@ class ImportContext():
 				return keyMap # all resolved already
 
 		idFieldNames = self._getRemoteIdFields(modelName)
-		records = self.remoteOdoo.readData(modelName, idFieldNames, ids = ids) #TODO: add remote consideration domain
+		records = self.remoteOdoo.readData(modelName, idFieldNames, self.log, ids = ids) #TODO: add remote consideration domain
 
 		#_logger.info("_fetchRemoteKeys() : read idFields of {} remote records (from {} ids) of type {}".format(len(records), len(ids or []), modelName))
 
@@ -515,10 +529,11 @@ class ImportContext():
 						modelName, record, idFieldNames
 				))
 
-			keyMap[record['id']] = {
+			x = keyMap[record['id']] = {
 				'remoteKeys' 	: record,
 				'localId' 		: None
 			}
+			#_logger.info("remote keys {}::{} = {}".format(modelName, record['id'], x))
 
 		return keyMap
 
@@ -544,6 +559,7 @@ class ImportContext():
 		''' reads to-be-imported data for a model from remote into self.remoteData '''
 		ids = set(ids)
 		if not ids:
+			# sanity check
 			if modelName in self.remoteData or self.getImportStrategy(modelName) != 'import':
 				raise Exception(
 					"_readRemoteData() without specific ids is only allowed once for non-import type name '{}'".format(modelName)
@@ -558,11 +574,11 @@ class ImportContext():
 		idsNotPresent = ids - remoteData.keys()
 
 		if idsNotPresent or not ids:
-			records = self.remoteOdoo.readData(modelName, fieldsToImport, ids = idsNotPresent)
+			records = self.remoteOdoo.readData(modelName, fieldsToImport, self.log, ids = idsNotPresent)
 			for record in records:
 				remoteData[record['id']] = record
 
-			self.log('info', "{} : read {}/{} remote records with {} fields".format(
+			_logger.info("{} : read {}/{} remote records with {} fields".format(
 				modelName, len(records), ids and len(ids) or 0, len(fieldsToImport)
 			))
 
@@ -579,7 +595,7 @@ class colpariOdooImportRunMessage(models.Model):
 	_rec_name = 'text'
 
 	import_run = fields.Many2one('colpari.odoo_import_run', required=True, ondelete='cascade')
-	level = fields.Selection([('debug', 'Debug'), ('info', 'Info'), ('warning', 'Warning'), ('error', 'Error')], default='configure')
+	level = fields.Selection([('0_error', 'Error'), ('1_warning', 'Warning'), ('2_info', 'Info'),('3_debug', 'Debug')], required=True)
 	text = fields.Char()
 
 	model_name = fields.Char()
@@ -628,7 +644,7 @@ class colpariOdooImportRunMessage(models.Model):
 		if not mc:
 			raise ValidationError("Model is not configured in import config - not adding field settings.")
 
-		mc.setFieldconfig(self.field_name, {'field_import_strategy' : 'ignore'})
+		mc.setFieldConfig(self.field_name, {'field_import_strategy' : 'ignore'})
 
 		self.field_name = False # disable action / hide button
 
@@ -670,11 +686,11 @@ class colpariOdooImportRun(models.Model):
 			theImport.doMatching()
 
 		except ImportException as ie:
-			self._log('error', str(ie), **ie.kwargs)
+			self._log('0_error', str(ie), **ie.kwargs)
 			self.state = 'failed'
 
 		except Exception as e:
 			txt = traceback.format_exc()
-			self._log('error', txt)
+			self._log('0_error', txt)
 			self.state = 'failed'
 			return None
