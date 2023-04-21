@@ -90,7 +90,12 @@ class ImportContext():
 		return h
 
 	def getConfiguredModelNames(self):
-		return self.importConfig.mapped('model_configs.import_model.model')
+		return [
+			config.import_model.model
+				for config in self.importConfig.mapped('model_configs')
+				if config.model_import_strategy != 'ignore'
+		]
+		#return self.importConfig.mapped('model_configs.import_model.model')
 
 	def getConfiguredHandlers(self):
 		# return the handlers for all explicitly configured models
@@ -118,7 +123,7 @@ class ImportContext():
 			thisPass = dependencyIdsToResolve
 			dependencyIdsToResolve = {}
 
-			for handler, dependencyIds in thisPass.items():				
+			for handler, dependencyIds in thisPass.items():
 				if not dependencyIds: # sanity check
 					raise Exception("Empty dependency list")
 
@@ -130,6 +135,10 @@ class ImportContext():
 
 		for handler in self.getConfiguredHandlers():
 			self.log('2_info', handler.status(), modelName=handler.modelName)
+
+		for handler in self.getConfiguredHandlers():
+			handler.writeRecursive({ handler })
+
 
 class colpariOdooImportRunMessage(models.Model):
 	_name = 'colpari.odoo_import_run_message'

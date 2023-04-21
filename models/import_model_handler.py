@@ -225,37 +225,45 @@ class ImportModelHandler():
 
 		return True
 
+	def _getDependenciesOfRecords(self, records):
+
+		fieldsToImport = self.getFieldNamesToImport()
+		relFields = list(filter(
+			lambda x: x[0] in fieldsToImport,
+			self.fieldsWhere('relation').items()
+		))
+		result = {}
+
+		for relationFieldName, relationField in relFields:
+
+			relatedType = self.shouldFollowDependency(relationFieldName)
+			if not relatedType:
+				continue
+
+			isMany2One = relationField['type'] == 'many2one'
+			dependencyIds = set()
+			for remoteId, remoteRecord in records.items():
+				relationFieldValue = remoteRecord[relationFieldName]
+				if isMany2One:
+					dependencyIds.add(relationFieldValue[0])
+				else:
+					dependencyIds.update(relationFieldValue)
+
+			if dependencyIds:
+				result.setdefault(relatedType, set()).update(dependencyIds)
+
+		return result
+
 	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
 		# fetch remote data
 		remoteData = self.readRemoteData(remoteIds)
 
 		fieldsToImport = self.getFieldNamesToImport()
 
-		# check all relation fields
-		for relationFieldName, relationField in self.fieldsWhere('relation').items():
-			if relationFieldName not in fieldsToImport:
-				continue
+		dependencies = self._getDependenciesOfRecords(remoteData)
 
-			relatedType = self.shouldFollowDependency(relationFieldName)
-			if not relatedType:
-				continue
-
-			if not relatedType.modelConfig:
-				self.log( # log message if type is not configured
-					'2_info', "following dependency {} -> {}".format(relationFieldName, relatedType.modelName),
-					modelName = self.modelName, fieldName = relationFieldName, dependencyType = relatedType.modelName
-				)
-
-			dependencyIds = set()
-			isMany2One = relationField['type'] == 'many2one'
-			for remoteId in filter(None, map(lambda remoteDict : remoteDict[relationFieldName], remoteData.values())):
-				if isMany2One:
-					dependencyIds.add(remoteId[0])
-				else:
-					dependencyIds.update(remoteId)
-
-			if dependencyIds: # update dependencyIdsToResolve if we have any news
-				 dependencyIdsToResolve.setdefault(relatedType, set()).update(dependencyIds)
+		for _type, ids in dependencies.items():
+			dependencyIdsToResolve.setdefault(_type, set()).update(ids)
 
 		return remoteData
 
@@ -296,9 +304,14 @@ class ImportModelHandler():
 		return None
 
 	def status(self):
-		return "{} : {} keys, {} resolved, {} to create, {} to update".format(
-			self.modelName, len(self.keyMaterial or []), len(self.idMap), len(self.toUpdate), len(self.toCreate), 
+		checkSum = set(self.idMap.keys()) ^ (self.keyMaterial and self.keyMaterial.keys() or set()) ^ self.toUpdate.keys() ^ self.toCreate.keys()
+		return "{} ({}/{}): {} keys, {} resolved, {} to update, {} to create (checkSum={})".format(
+			self.modelName, self.importStrategy, self.matchingStrategy,
+			len(self.keyMaterial or []), len(self.idMap), len(self.toUpdate), len(self.toCreate), len(checkSum)
 		)
+
+	def isFinished(self):
+		return not (self.toCreate or self.toUpdate)
 
 	def readIncremental(self, ids, dependencyIdsToResolve):
 		if not ids:
@@ -358,6 +371,35 @@ class ImportModelHandler():
 
 		else:
 			raise Exception("Unhandled model import strategy '{}' for {}".format(self.importStrategy, self.modelName))
+
+	def writeRecursive(self, typesSeen):
+		'''
+			for update/create
+				find all ids we depend on
+				check if resolved
+				if not recurse to dependency
+		'''
+		dependencies = self._getDependenciesOfRecords(self.toCreate)
+		# see which ones are completely resolved and remove them
+		for handler, dependencyIds in dict(dependencies).items():
+			(yes, no) = handler.resolve(dependencyIds)
+			if not no: # all resolved
+				del dependencies[handler]
+
+		if not dependencies:
+			_logger.info("{} update REOLVE COMPLETE".format(self.modelName))
+
+
+		for handler, dependencyIds in dependencies.items():
+			if handler in typesSeen:
+				_logger.info("{} update : has {} unresolved dependencies to {} - NOT recursing circle".format(
+					self.modelName, len(dependencyIds), handler.modelName
+				))
+			else:
+				_logger.info("{} update : has {} unresolved dependencies to {} - recursing".format(
+					self.modelName, len(dependencyIds), handler.modelName
+				))
+				handler.writeRecursive(typesSeen.union([self]))
 
 	def resolve(self, ids):
 		theEnv 			= self.env[self.modelName]
@@ -499,7 +541,7 @@ class ImportModelHandler():
 			if len(idsNotPresent) != len(records):
 				raise Exception("Got {} records of remote model {} where we asked for {} ids".format(
 					len(records), self.modelName, len(idsNotPresent)
-					
+
 				))
 
 			for record in records:
