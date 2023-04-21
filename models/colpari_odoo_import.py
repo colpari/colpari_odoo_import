@@ -86,7 +86,7 @@ class colpariOdooImportModelConfig(models.Model):
 
 	model_import_strategy = fields.Selection([
 		('import'		, 'Create or update records'),
-		('dependency'	, 'As dependency data'),
+		('dependency'	, 'As bulk dependency data'),
 		('match'		, 'Do not import but explicitly configure matching'),
 		('ignore'		, 'Ignore (do not import or match)'),
 	], default='import', required=True)
