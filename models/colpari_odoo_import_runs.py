@@ -101,6 +101,11 @@ class ImportContext():
 		# return the handlers for all explicitly configured models
 		return map(self.getHandler, self.getConfiguredModelNames())
 
+	def __logHandlerStatus(self):
+
+		for handler in self.getConfiguredHandlers():
+			self.log('2_info', handler.status(), modelName=handler.modelName)
+
 	def doMatching(self):
 
 		dependencyIdsToResolve = {
@@ -131,13 +136,31 @@ class ImportContext():
 
 				handler.readIncremental(dependencyIds, dependencyIdsToResolve)
 
-		_logger.info("doMatching() finished after {} iterations".format(i))
+		_logger.info("doMatching() phase 0 finished after {} iterations".format(i))
 
-		for handler in self.getConfiguredHandlers():
-			self.log('2_info', handler.status(), modelName=handler.modelName)
+		# logical test state passed!
+		#TODO: provide todo-info logged by below line more prominent(ly?) in UI
+		self.__logHandlerStatus()
 
-		for handler in self.getConfiguredHandlers():
-			handler.writeRecursive({ handler })
+		finished = False
+
+		_pass = 0
+		while not finished:
+			_pass+=1
+			finished = True
+			objectsWritten = 0
+			for handler in self.getConfiguredHandlers():
+				writeResult = handler.writeRecursive()
+				if writeResult:
+					objectsWritten += writeResult
+				if handler.isFinished():
+					finished = True
+
+			_logger.info("pase 1 pass {}, {} objects written".format(_pass, objectsWritten))
+
+			if not objectsWritten:
+				self.__logHandlerStatus()
+				raise ValidationError("Nothing found writeable in pass {}".format(_pass))
 
 
 class colpariOdooImportRunMessage(models.Model):
@@ -236,6 +259,8 @@ class colpariOdooImportRun(models.Model):
 		try:
 			theImport = ImportContext(self)
 			theImport.doMatching()
+			_logger.info("\n\n============= SUCCESSSSSSS =============\n\n")
+			self.env.cr.rollback()
 
 		except ImportException as ie:
 			txt = traceback.format_exc()

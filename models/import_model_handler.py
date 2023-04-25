@@ -55,6 +55,7 @@ class ImportModelHandler():
 			# }
 		}
 
+		# FIXME prefix these internal fields with __
 		self.remoteData = {
 			# id : { field : value, ... }
 		}
@@ -254,6 +255,50 @@ class ImportModelHandler():
 
 		return result
 
+	def __mapDependenciesOfRecords(self, records):
+		''' maps ids in all dependency fields of all records to local values '''
+		fieldsToImport = self.getFieldNamesToImport()
+		relFields = list(filter(
+			lambda x: x[0] in fieldsToImport and self.shouldFollowDependency(x[0]), #TODO: too scrummed
+			self.fieldsWhere('relation').items()
+		))
+
+		if not relFields:
+			_logger.info("{}.__mapDependenciesOfRecords() without relFields?".format(self.modelName))
+			# nothing to resolve. return a copy
+			return {
+				_id : dict(_record)
+					for _id, _record in records.items()
+			}
+
+		result = {}
+
+		for relationFieldName, relationField in relFields:
+
+			relatedType = self.shouldFollowDependency(relationFieldName)
+			isMany2One = relationField['type'] == 'many2one'
+			dependencyIds = set()
+			for remoteId, remoteRecord in records.items():
+				relationFieldValue = remoteRecord[relationFieldName]
+
+				ids2Map = [relationFieldValue[0]] if isMany2One else relationFieldValue
+
+				mappedIds = list(map(relatedType.idMap.get, ids2Map))
+				if len(ids2Map) != len(mappedIds):
+					raise ValidationError("Not all ids found?")
+
+				# copy/edit remoteRecord in/to result
+				result.setdefault(remoteId, dict(remoteRecord))[relationFieldName] = (
+					mappedIds[0] if isMany2One else mappedIds
+				)
+
+		if len(records) != len(result): # sanity check
+			raise ValidationError("I did not copy&return all records for {}? ({}/{})\nrecords: {}\n\nresult: {}".format(
+				self.modelName, len(records), len(result), records, result
+			))
+
+		return result
+
 	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
 		# fetch remote data
 		remoteData = self.readRemoteData(remoteIds)
@@ -372,34 +417,87 @@ class ImportModelHandler():
 		else:
 			raise Exception("Unhandled model import strategy '{}' for {}".format(self.importStrategy, self.modelName))
 
-	def writeRecursive(self, typesSeen):
+	def writeRecursive(self, typesSeen = set()):
+
+		result = 0 # number of objects changed
+		for objectSet, operation in ((self.toCreate, 'create'), (self.toUpdate, 'update')):
+			tttypesSeen = set(typesSeen)
+			tttypesSeen.add(self)
+			writeResult = self.__writeRecursive(tttypesSeen, objectSet, operation)
+			result + writeResult
+
+		return result
+
+	def __keySelect(self, key):
+		return lambda x : x[key]
+
+	def __toDictionary(self, keyName, iterable):
+		result = {}
+		for x in iterable:
+			result.setdefault(x[keyName], x)
+		return result
+
+	def __writeRecursive(self, typesSeen, objectSet, operation):
 		'''
 			for update/create
 				find all ids we depend on
 				check if resolved
 				if not recurse to dependency
 		'''
-		dependencies = self._getDependenciesOfRecords(self.toCreate)
+		mappedIds = {}
+		dependencies = self._getDependenciesOfRecords(objectSet)
 		# see which ones are completely resolved and remove them
 		for handler, dependencyIds in dict(dependencies).items():
 			(yes, no) = handler.resolve(dependencyIds)
 			if not no: # all resolved
+				mappedIds[handler.modelName] = handler.idMap
 				del dependencies[handler]
 
+		# any unresolved dependencies left?
 		if not dependencies:
-			_logger.info("{} update REOLVE COMPLETE".format(self.modelName))
+			_logger.info("{} {} RESOLVE COMPLETE".format(self.modelName, operation))
+			if operation == 'update':
+				# map ids of objectset
+				mappedIds = map(self.idMap.get, map(self.__keySelect('id'), objectSet))
+				# locally fetch objects with mapped ids
+				localObjects = self.__toDictionary('id',
+					self.env[self.modelName].browse(mappedIds)
+				)
+				# check size
+				if len(localObjects) != len(objectSet): # sanity check
+					raise ValidationError("Got {} local objects when browsing for {} ids".format(lenb(localObjects), len(objectSet)))
+				# map ids in all dependency fields
+				objectSetMapped = self.__mapDependenciesOfRecords(objectSet)
+				# loop and write per id
+				for localId, dataToUpdate in objectSetMapped:
+					localObjects[localId].update(dataToUpdate)
+				_logger.info("UPDATED {} {} records".format(len(objectSet), self.modelName))
+				return len(objectSet) # return number of objects changed
+
+			elif operation == 'create':
+				objectSetMapped = self.__mapDependenciesOfRecords(objectSet)
+				createResult = self.env[self.modelName].create(list(objectSetMapped.values()))
+				_logger.info("CREATED {} {} records".format(len(objectSetMapped), self.modelName))
+				return len(createResult) # return number of objects changed
+			else:
+				raise ValidationError("Unsupported operation : '{}'".format(operation))
 
 
+		# we have unresolved dependencies. recurse to them to see if we can write them
+		result = 0
 		for handler, dependencyIds in dependencies.items():
 			if handler in typesSeen:
-				_logger.info("{} update : has {} unresolved dependencies to {} - NOT recursing circle".format(
-					self.modelName, len(dependencyIds), handler.modelName
-				))
+				# _logger.info("{} {} : has {} unresolved dependencies to {} - NOT recursing circle".format(
+				# 	operation, self.modelName, len(dependencyIds), handler.modelName
+				# ))
+				continue
 			else:
-				_logger.info("{} update : has {} unresolved dependencies to {} - recursing".format(
-					self.modelName, len(dependencyIds), handler.modelName
+				_logger.info("{} {} : has {} unresolved dependencies to {} - recursing".format(
+					operation, self.modelName, len(dependencyIds), handler.modelName
 				))
-				handler.writeRecursive(typesSeen.union([self]))
+				result += handler.writeRecursive(typesSeen) # return number of objects changed
+
+		return result
 
 	def resolve(self, ids):
 		theEnv 			= self.env[self.modelName]
@@ -461,7 +559,7 @@ class ImportModelHandler():
 				)
 
 		#self.log('3_debug',
-		_logger.info("{} resolve +{} -{}".format(self.modelName, len(resolvedIds), len(unresolvedIds)))#, modelName=self.modelName)
+		#_logger.info("{} resolve +{} -{}".format(self.modelName, len(resolvedIds), len(unresolvedIds)))#, modelName=self.modelName)
 		if ids ^ resolvedIds ^ unresolvedIds: # sanity check
 			raise Exception("Calculated id sets do not add up to the given id set:\ninput     : {}\nresolved  : {}\nunresolved:{}".format(
 				ids, resolvedIds, unresolvedIds
