@@ -45,7 +45,8 @@ class ImportModelHandler():
 
 		self.remoteFields 		= {} 	# lazy fieldName -> properties
 		self.localFields 		= {} 	# lazy fieldName -> properties
-		self.fieldsToImport		= None 	# lazy set(names)
+		self.fieldsToImport		= None 	# lazy set((fn, f))
+		self.relFieldsToImport	= None 	# lazy set((fn, f))
 
 		self._fieldProperties	= { # lazy index of local field properties by propertyName
 			# propertyName : {
@@ -64,6 +65,9 @@ class ImportModelHandler():
 		self.idMap			= {} 	# { remoteId : localId }
 		self.toCreate		= {} 	# { remoteId : { k :v, k :v... } }
 		self.toUpdate		= {} 	# { remoteId : { k :v, k :v... } }
+
+	def __str__(self):
+		return "<{} handler>".format(self.modelName)
 
 	def hasImportStrategy(self, *strategies):
 		return self.importStrategy in strategies
@@ -131,14 +135,33 @@ class ImportModelHandler():
 		return relatedType
 
 
-	def getFieldNamesToImport(self):
+	def getFieldsToImport(self):
 		if self.fieldsToImport == None:
 			if not self.hasImportStrategy('import', 'dependency'):
-				raise Exception("Code path error. getFieldNamesToImport() called for strategy {}".format(strategy))
+				raise Exception("Code path error. getFieldsToImport() called for strategy {}".format(strategy))
 
-			self.fieldsToImport = set(self.getLocalFields().keys()).intersection(self.getRemoteFields().keys())
+			self.fieldsToImport = {}
+			localFields = self.getLocalFields()
+			remoteFields = self.getRemoteFields()
+
+			for fn, f in localFields.items():
+				if fn not in remoteFields:
+					continue
+				if f.get('relation') and not self.shouldFollowDependency(fn):
+					continue
+				self.fieldsToImport[fn] = f
 
 		return self.fieldsToImport
+
+	def getRelFieldsToImport(self):
+		if self.relFieldsToImport == None:
+			fieldsToImport = self.getFieldsToImport()
+			if not self.hasImportStrategy('import', 'dependency'):
+				raise Exception("Code path error. getRelFieldsToImport() called for strategy {}".format(strategy))
+
+			self.relFieldsToImport = { fn : f for fn, f in fieldsToImport.items() if f.get('relation')}
+
+		return self.relFieldsToImport
 
 	def _getPropertiesEntry(self, propertyName):
 		entry = self._fieldProperties.setdefault(propertyName, {})
@@ -147,13 +170,21 @@ class ImportModelHandler():
 			names  = entry['names'] = set()
 			dicts  = entry['dicts'] = {}
 			values = entry['values'] = {}
+			notNames  = entry['!names'] = set()
+			notDicts  = entry['!dicts'] = {}
+			notValues = entry['!values'] = {}
 			for fn, f in self.getLocalFields().items():
 				propVal = f.get(propertyName)
 				if propVal:
 					names.add(fn)
 					dicts[fn] = f
 					values[fn] = propVal
+				else:
+					notNames.add(fn)
+					notDicts[fn] = f
+					notValues[fn] = propVal
 
+			#FIXME: freeze data
 		return entry
 
 	def fieldsWhere(self, propertyName):
@@ -161,6 +192,9 @@ class ImportModelHandler():
 
 	def fieldNamesWhere(self, propertyName):
 		return self._getPropertiesEntry(propertyName)['names']
+
+	def fieldNamesWhereNot(self, propertyName):
+		return self._getPropertiesEntry(propertyName)['!names']
 
 	def fieldProperties(self, propertyName):
 		return self._getPropertiesEntry(propertyName)['values']
@@ -184,7 +218,7 @@ class ImportModelHandler():
 		#self.log('3_debug', msg, modelName=self.modelName)
 
 		# determine which fields to import
-		fieldsToImport = self.getFieldNamesToImport()
+		fieldsToImport = self.getFieldsToImport()
 
 		# check if we should be able to provide all locally required fields
 		for fieldName, field in localFields.items():
@@ -193,10 +227,10 @@ class ImportModelHandler():
 			ignored = self.getFieldImportStrategy(fieldName) == 'ignore'
 			#_logger.info("checking field {} on {}; req={}, rel={}, ign={}".format(fieldName, self.modelName, required, relatedTypeName, ignored))
 			if ignored:
-				# NOTE: this mutates self.fieldsToImport[modelName]
+				# NOTE: this mutates self.fieldsToImport
 				# 	thus, this method is part of the is-proper-set-up path for this class
 				# 	and must be called right after all ImportModelHandler instances are created
-				fieldsToImport.discard(fieldName)
+				del fieldsToImport[fieldName]
 
 			if required:
 				if ignored:
@@ -220,34 +254,32 @@ class ImportModelHandler():
 				"Empty import field list for {}".format(self.modelName), modelName=self.modelName
 			)
 
-		unimportedFields = set(localFields.keys()) - fieldsToImport
+		unimportedFields = set(localFields.keys()) - fieldsToImport.keys()
 		if unimportedFields:
 			self.log('3_debug', "unimported fields : {}".format(unimportedFields), modelName=self.modelName)
 
 		return True
 
-	def _getDependenciesOfRecords(self, records):
+	def _getDependenciesOfRecords(self, records, requiredOnly):
 
-		fieldsToImport = self.getFieldNamesToImport()
-		relFields = list(filter(
-			lambda x: x[0] in fieldsToImport,
-			self.fieldsWhere('relation').items()
-		))
 		result = {}
 
-		for relationFieldName, relationField in relFields:
+		relFieldNames = self.getRelFieldsToImport().keys()
 
+		if requiredOnly:
+			relFieldNames = set(relFieldNames) & self.fieldNamesWhere('required')
+
+		for relationFieldName in relFieldNames:
 			relatedType = self.shouldFollowDependency(relationFieldName)
 			if not relatedType:
-				continue
+				raise ValidationError(
+					"This path should not be taken since relFieldsToImport is already filtered by shouldFollowDependency()??"
+				)
 
-			isMany2One = relationField['type'] == 'many2one'
 			dependencyIds = set()
 			for remoteId, remoteRecord in records.items():
 				relationFieldValue = remoteRecord[relationFieldName]
-				if isMany2One:
-					dependencyIds.add(relationFieldValue[0])
-				else:
+				if relationFieldValue:
 					dependencyIds.update(relationFieldValue)
 
 			if dependencyIds:
@@ -255,42 +287,39 @@ class ImportModelHandler():
 
 		return result
 
-	def __mapDependenciesOfRecords(self, records):
-		''' maps ids in all dependency fields of all records to local values '''
-		fieldsToImport = self.getFieldNamesToImport()
-		relFields = list(filter(
-			lambda x: x[0] in fieldsToImport and self.shouldFollowDependency(x[0]), #TODO: too scrummed
-			self.fieldsWhere('relation').items()
-		))
+	def __mapDependenciesOfRecords(self, records, requiredOnly):
+		''' - copy records and map remote ids in all relation fields to local ids
+			- if requiredOnly remove all non-required relation fields from result
+			- convert many2One fields to single values since we handle them as lists internally
+		'''
+		relFields = self.getRelFieldsToImport()
 
-		if not relFields:
-			_logger.info("{}.__mapDependenciesOfRecords() without relFields?".format(self.modelName))
-			# nothing to resolve. return a copy
-			return {
-				_id : dict(_record)
-					for _id, _record in records.items()
-			}
-
+		#NOTE: yes, this would be much faster if the outer loop is relFields and records is inner...
+		#		...but this way it has fewer border cases
 		result = {}
+		for remoteId, remoteRecord in records.items():
+			destination = result[remoteId] = dict(remoteRecord) # copy
+			for relationFieldName, relationField in relFields.items():
+				if requiredOnly and not self.getLocalFields()[relationFieldName].get('required'): # maybe remove nonRequired field
+					del destination[relationFieldName]
+				else: # map rest
+					relatedType = self.shouldFollowDependency(relationFieldName) # should never be False here
+					relationFieldValue = destination[relationFieldName]
+					if relationFieldValue:
+						mappedIds = []
+						for remoteRelatedId in relationFieldValue:
+							localId = relatedType.idMap.get(remoteRelatedId)
+							if not localId:
+								raise ValidationError("{} could not map remote id {}\nout of: {}".format(
+									relatedType.modelName, remoteRelatedId, relatedType.idMap
+								))
+							mappedIds.append(localId)
 
-		for relationFieldName, relationField in relFields:
-
-			relatedType = self.shouldFollowDependency(relationFieldName)
-			isMany2One = relationField['type'] == 'many2one'
-			dependencyIds = set()
-			for remoteId, remoteRecord in records.items():
-				relationFieldValue = remoteRecord[relationFieldName]
-
-				ids2Map = [relationFieldValue[0]] if isMany2One else relationFieldValue
-
-				mappedIds = list(map(relatedType.idMap.get, ids2Map))
-				if len(ids2Map) != len(mappedIds):
-					raise ValidationError("Not all ids found?")
-
-				# copy/edit remoteRecord in/to result
-				result.setdefault(remoteId, dict(remoteRecord))[relationFieldName] = (
-					mappedIds[0] if isMany2One else mappedIds
-				)
+						destination[relationFieldName] = (
+							mappedIds[0] # convert many2One fields to single values since we handle them as lists internally
+								if relationField.get('type') == 'many2one' else
+							mappedIds
+						)
 
 		if len(records) != len(result): # sanity check
 			raise ValidationError("I did not copy&return all records for {}? ({}/{})\nrecords: {}\n\nresult: {}".format(
@@ -299,13 +328,19 @@ class ImportModelHandler():
 
 		return result
 
+	def __removeResolvedDependenciesFrom(self, dependencies):
+		# see which ones are completely resolved and remove them
+		for handler, dependencyIds in dict(dependencies).items():
+			(yes, no) = handler.resolve(dependencyIds)
+			if not no: # all resolved
+				del dependencies[handler]
+
 	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
 		# fetch remote data
 		remoteData = self.readRemoteData(remoteIds)
 
-		fieldsToImport = self.getFieldNamesToImport()
-
-		dependencies = self._getDependenciesOfRecords(remoteData)
+		#TODO: are there cases where we could go with requiredOnly = True and thus save time?
+		dependencies = self._getDependenciesOfRecords(remoteData, requiredOnly = False)
 
 		for _type, ids in dependencies.items():
 			dependencyIdsToResolve.setdefault(_type, set()).update(ids)
@@ -358,6 +393,9 @@ class ImportModelHandler():
 	def isFinished(self):
 		return not (self.toCreate or self.toUpdate)
 
+	def hasContent(self):
+		return self.toCreate or self.toUpdate or self.keyMaterial or self.idMap
+
 	def readIncremental(self, ids, dependencyIdsToResolve):
 		if not ids:
 			raise Exception("Empty id list")
@@ -406,7 +444,7 @@ class ImportModelHandler():
 						"\n".join(map(str, someUnresolvedKeys))
 					),
 					# kwargs for log entry
-					modelName = self.modelName
+					modelName = self.modelName, dependencyType = self.modelName
 				)
 
 		elif self.importStrategy == 'dependency':
@@ -417,87 +455,119 @@ class ImportModelHandler():
 		else:
 			raise Exception("Unhandled model import strategy '{}' for {}".format(self.importStrategy, self.modelName))
 
-	def writeRecursive(self, typesSeen = set()):
-
-		result = 0 # number of objects changed
-		for objectSet, operation in ((self.toCreate, 'create'), (self.toUpdate, 'update')):
-			tttypesSeen = set(typesSeen)
-			tttypesSeen.add(self)
-			writeResult = self.__writeRecursive(tttypesSeen, objectSet, operation)
-			result + writeResult
-
-		return result
-
 	def __keySelect(self, key):
 		return lambda x : x[key]
 
 	def __toDictionary(self, keyName, iterable):
 		result = {}
 		for x in iterable:
+			#TODO: assert keys unique?
 			result.setdefault(x[keyName], x)
 		return result
 
-	def __writeRecursive(self, typesSeen, objectSet, operation):
-		'''
-			for update/create
-				find all ids we depend on
-				check if resolved
-				if not recurse to dependency
-		'''
-		mappedIds = {}
-		dependencies = self._getDependenciesOfRecords(objectSet)
-		# see which ones are completely resolved and remove them
-		for handler, dependencyIds in dict(dependencies).items():
-			(yes, no) = handler.resolve(dependencyIds)
-			if not no: # all resolved
-				mappedIds[handler.modelName] = handler.idMap
-				del dependencies[handler]
+	def tryCreate(self):
+
+		if not self.toCreate:
+			return True
+
+		dependencies = self._getDependenciesOfRecords(self.toCreate, requiredOnly = True)
+
+		if dependencies:
+			_logger.info("{} create dependencies 1:\n{}".format(self.modelName, dependencies))
+
+		self.__removeResolvedDependenciesFrom(dependencies)
 
 		# any unresolved dependencies left?
-		if not dependencies:
-			_logger.info("{} {} RESOLVE COMPLETE".format(self.modelName, operation))
-			if operation == 'update':
-				# map ids of objectset
-				mappedIds = map(self.idMap.get, map(self.__keySelect('id'), objectSet))
-				# locally fetch objects with mapped ids
-				localObjects = self.__toDictionary('id',
-					self.env[self.modelName].browse(mappedIds)
-				)
-				# check size
-				if len(localObjects) != len(objectSet): # sanity check
-					raise ValidationError("Got {} local objects when browsing for {} ids".format(lenb(localObjects), len(objectSet)))
-				# map ids in all dependency fields
-				objectSetMapped = self.__mapDependenciesOfRecords(objectSet)
-				# loop and write per id
-				for localId, dataToUpdate in objectSetMapped:
-					localObjects[localId].update(dataToUpdate)
-				_logger.info("UPDATED {} {} records".format(len(objectSet), self.modelName))
-				return len(objectSet) # return number of objects changed
+		if dependencies:
+			# we cannot write
+			_logger.info("{} has unresolved dependencies to {} objects of {} types".format(
+				self.modelName, sum(map(lambda x: len(x), dependencies.values())), len(dependencies.keys())
+			))
+			return False
 
-			elif operation == 'create':
-				objectSetMapped = self.__mapDependenciesOfRecords(objectSet)
-				createResult = self.env[self.modelName].create(list(objectSetMapped.values()))
-				_logger.info("CREATED {} {} records".format(len(objectSetMapped), self.modelName))
-				return len(createResult) # return number of objects changed
-			else:
-				raise ValidationError("Unsupported operation : '{}'".format(operation))
+		# nope - let's go!
+		_logger.info("{} create RESOLVE (mandatory) COMPLETE, writing {} records".format(
+			self.modelName, len(self.toCreate)
+		))
 
+		objectSetMapped = self.__mapDependenciesOfRecords(self.toCreate, requiredOnly = True)
+		recordsToCreate = list(objectSetMapped.values())
 
-		# we have unresolved dependencies. recurse to them to see if we can write them
-		result = 0
-		for handler, dependencyIds in dependencies.items():
-			if handler in typesSeen:
-				# _logger.info("{} {} : has {} unresolved dependencies to {} - NOT recursing circle".format(
-				# 	operation, self.modelName, len(dependencyIds), handler.modelName
-				# ))
-				continue
-			else:
-				_logger.info("{} {} : has {} unresolved dependencies to {} - recursing".format(
-					operation, self.modelName, len(dependencyIds), handler.modelName
-				))
-				result += handler.writeRecursive(typesSeen) # return number of objects changed
+		# __mapDependenciesOfRecords(requiredOnly = True) removed all non-required dependency fields (if any)...
+		# ... put them into the 'update' stage (self.toUpdate)
+		optionalRelatedFields = self.fieldNamesWhereNot('required') & self.getRelFieldsToImport().keys()
+		updatesScheduled = 0
+		if optionalRelatedFields:
+			for remoteId, unMappedRecord in self.toCreate.items():
+				if remoteId in self.toUpdate: # sanity check
+					raise ValidationError("{} remote id {} should not yet be present in self.toUpdate".format(
+						self.modelName, remoteId
+					))
 
-		return result
+				updateData = self.toUpdate[remoteId] = {'id' : remoteId}
+
+				#NOTE: using copy of UNmapped value for later update (because it will map again)
+				for fn in optionalRelatedFields:
+					updateData[fn] = list(unMappedRecord[fn])
+
+				updatesScheduled+=1
+
+		createResult = self.env[self.modelName].create(recordsToCreate)
+		if len(recordsToCreate) != len(createResult): # sanity check
+			raise ValidationError("Got {} created records when trying to create {}".format(
+				len(createResult), len(recordsToCreate)
+			))
+		# add ids of newly created records to idMap
+		# NOTE: this assumes model.create() returns the created records in the same order as the supplied data.
+		#		which proves to be true for odoo 14 and 15 at least :-}
+		# FIXME: unit test
+		i = 0
+		for created in createResult:
+			self.idMap[recordsToCreate[i]['id']] = created['id']
+			i+=1
+
+		_logger.info("CREATED {} {} records ({} updates scheduled)".format(len(recordsToCreate), self.modelName, updatesScheduled))
+		self.toCreate.clear()
+		return len(createResult) # return True/number of objects changed
+
+	def tryUpdate(self):
+		if not self.toUpdate:
+			return True
+
+		dependencies = self._getDependenciesOfRecords(self.toUpdate, requiredOnly = False)
+		self.__removeResolvedDependenciesFrom(dependencies)
+
+		# any unresolved dependencies left?
+		if dependencies:
+			# we cannot write
+			raise ValidationError("Unresolved dependencies in update stage for {}?\n{}".format(self.modelName, dependencies))
+			#return False
+
+		# nope - let's go!
+		_logger.info("{} update RESOLVE COMPLETE, writing {} records".format(
+			self.modelName, len(self.toUpdate)
+		))
+
+		objectSetMapped = self.__mapDependenciesOfRecords(self.toUpdate, requiredOnly = False)
+		# map ids of objectSetMapped
+		mappedIds = list(map(self.idMap.get, map(self.__keySelect('id'), objectSetMapped)))
+		# locally fetch objects with mapped ids
+		localObjects = self.__toDictionary('id',
+			self.env[self.modelName].browse(mappedIds)
+		)
+		# check size
+		if len(localObjects) != len(self.toUpdate): # sanity check
+			raise ValidationError("Got {} local objects when browsing for {} ids".format(len(localObjects), len(self.toUpdate)))
+		# loop and update local objects per id
+		for remoteId, dataToUpdate in objectSetMapped:
+			localId = self.idMap[remoteId]
+			localObjects[localId].update(dataToUpdate)
+
+		recordsWritten = len(self.toUpdate)
+
+		_logger.info("UPDATED {} {} records".format(recordsWritten, self.modelName))
+		self.toUpdate.clear()
+		return recordsWritten
 
 	def resolve(self, ids):
 		theEnv 			= self.env[self.modelName]
@@ -629,11 +699,12 @@ class ImportModelHandler():
 		idsNotPresent = ids - self.remoteData.keys()
 
 		if idsNotPresent:
-			fieldsToImport = self.getFieldNamesToImport()
-			records = self.remoteOdoo.readData(self.modelName, fieldsToImport, self.log, ids = idsNotPresent)
+			# read data for idsNotPresent into cache
+			fieldNamesToImport = self.getFieldsToImport().keys()
+			records = self.remoteOdoo.readData(self.modelName, fieldNamesToImport, self.log, ids = idsNotPresent)
 
 			_logger.info("{} : read {} of {}/{} remote records with {} fields".format(
-				self.modelName, len(records), len(idsNotPresent), len(ids), len(fieldsToImport)
+				self.modelName, len(records), len(idsNotPresent), len(ids), len(fieldNamesToImport)
 			))
 
 			if len(idsNotPresent) != len(records):
@@ -642,12 +713,21 @@ class ImportModelHandler():
 
 				))
 
+			many2oneFields = set([
+				fieldName for fieldName, field in self.getRelFieldsToImport().items()
+					if field['type'] == 'many2one'
+			])
+
+			# put into self.remoteData
 			for record in records:
 				self.remoteData[record['id']] = record
+				# convert many2one fields into a list with one id (they come as [id, displayName])
+				for fn in many2oneFields:
+					value = record[fn]
+					if value:
+						record[fn] = [value[0]]
 
-
-
-		return {
+		return { # return data for all requested ids from cache
 			_id : self.remoteData[_id] for _id in ids
 		}
 

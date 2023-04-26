@@ -103,8 +103,10 @@ class ImportContext():
 
 	def __logHandlerStatus(self):
 
-		for handler in self.getConfiguredHandlers():
-			self.log('2_info', handler.status(), modelName=handler.modelName)
+		#for handler in self.getConfiguredHandlers():
+		for handler in self._handlers.values():
+			if handler.hasContent():
+				self.log('2_info', handler.status(), modelName=handler.modelName)
 
 	def doMatching(self):
 
@@ -132,35 +134,41 @@ class ImportContext():
 				if not dependencyIds: # sanity check
 					raise Exception("Empty dependency list")
 
-				_logger.info("{} pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
+				_logger.info("{} phase 0 pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
 
 				handler.readIncremental(dependencyIds, dependencyIdsToResolve)
 
-		_logger.info("doMatching() phase 0 finished after {} iterations".format(i))
+		_logger.info("reading phase finished after {} iterations".format(i))
 
 		# logical test state passed!
 		#TODO: provide todo-info logged by below line more prominent(ly?) in UI
 		self.__logHandlerStatus()
 
-		finished = False
+		for IS_CREATE in (True, False): # first process objects to create, then update
+			phaseName = 'create' if IS_CREATE else 'update'
+			finished = False
+			_pass = 0
+			while not finished:
+				_pass+=1
+				finished = True
+				anyHandlerHasWritten = False
 
-		_pass = 0
-		while not finished:
-			_pass+=1
-			finished = True
-			objectsWritten = 0
-			for handler in self.getConfiguredHandlers():
-				writeResult = handler.writeRecursive()
-				if writeResult:
-					objectsWritten += writeResult
-				if handler.isFinished():
-					finished = True
+				for handler in self.getConfiguredHandlers():
+					if not (handler.toCreate if IS_CREATE else handler.toUpdate):
+						# nothing to do (anymore) for this type
+						continue
+					if (handler.tryCreate() if IS_CREATE else handler.tryUpdate()):
+						# we created the objects of this type. progess! :)
+						anyHandlerHasWritten = True
+					else:
+						# could not write these objects (yet)
+						finished = False
 
-			_logger.info("pase 1 pass {}, {} objects written".format(_pass, objectsWritten))
+				_logger.info("phase {} pass #{}, {} objects written".format(phaseName, _pass, objectsWritten))
 
-			if not objectsWritten:
-				self.__logHandlerStatus()
-				raise ValidationError("Nothing found writeable in pass {}".format(_pass))
+				if not anyHandlerHasWritten:
+					self.__logHandlerStatus()
+					raise ValidationError("Nothing found writeable in {} pass #{}".format(phaseName, _pass))
 
 
 class colpariOdooImportRunMessage(models.Model):
@@ -263,12 +271,14 @@ class colpariOdooImportRun(models.Model):
 			self.env.cr.rollback()
 
 		except ImportException as ie:
+			self.env.cr.rollback()
 			txt = traceback.format_exc()
 			#self._log('0_error', str(ie), **ie.kwargs)
 			self._log('0_error', txt, **ie.kwargs)
 			self.state = 'failed'
 
 		except Exception as e:
+			self.env.cr.rollback()
 			txt = traceback.format_exc()
 			self._log('0_error', txt)
 			self.state = 'failed'
