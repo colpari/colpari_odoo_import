@@ -287,39 +287,51 @@ class ImportModelHandler():
 
 		return result
 
-	def __mapDependenciesOfRecords(self, records, requiredOnly):
+	def __mapRecords(self, records, requiredDependenciesOnly):
 		''' - copy records and map remote ids in all relation fields to local ids
-			- if requiredOnly remove all non-required relation fields from result
+			- if requiredDependenciesOnly remove all non-required relation fields from result
+			- apply configured field value mappings
 			- convert many2One fields to single values since we handle them as lists internally
 		'''
 		relFields = self.getRelFieldsToImport()
 
 		#NOTE: yes, this would be much faster if the outer loop is relFields and records is inner...
 		#		...but this way it has fewer border cases
+
 		result = {}
+		# copy all records
 		for remoteId, remoteRecord in records.items():
 			destination = result[remoteId] = dict(remoteRecord) # copy
-			for relationFieldName, relationField in relFields.items():
-				if requiredOnly and not self.getLocalFields()[relationFieldName].get('required'): # maybe remove nonRequired field
-					del destination[relationFieldName]
-				else: # map rest
-					relatedType = self.shouldFollowDependency(relationFieldName) # should never be False here
-					relationFieldValue = destination[relationFieldName]
-					if relationFieldValue:
-						mappedIds = []
-						for remoteRelatedId in relationFieldValue:
-							localId = relatedType.idMap.get(remoteRelatedId)
-							if not localId:
-								raise ValidationError("{} could not map remote id {}\nout of: {}".format(
-									relatedType.modelName, remoteRelatedId, relatedType.idMap
-								))
-							mappedIds.append(localId)
 
-						destination[relationFieldName] = (
-							mappedIds[0] # convert many2One fields to single values since we handle them as lists internally
-								if relationField.get('type') == 'many2one' else
-							mappedIds
-						)
+		for fieldName, field in self.getFieldsToImport().items():
+			if fieldName in relFields:
+				# relation field
+				if requiredDependenciesOnly and not field.get('required'):
+					# remove non-required relations if requested
+					for remoteRecord in result.values():
+						del remoteRecord[fieldName]
+				else:
+					# map relation field
+					relatedType = self.shouldFollowDependency(fieldName) # should never be False here
+					for remoteRecord in result.values():
+						relationFieldValue = remoteRecord[fieldName]
+						if relationFieldValue:
+							mappedIds = list(map(relatedType.idMap.__getitem__, relationFieldValue))
+							remoteRecord[fieldName] = (
+								mappedIds[0] # convert many2One fields to single values since we handle them as lists internally
+									if field.get('type') == 'many2one' else
+								mappedIds
+							)
+
+
+			else:
+				# normal field
+				fc = self.getFieldConfig(fieldName)
+				defaultValue = fc and fc.mapsToDefaultValue()
+				if defaultValue:
+					# set default value for all records
+					for remoteRecord in result.values():
+						remoteRecord[fieldName] = defaultValue
 
 		if len(records) != len(result): # sanity check
 			raise ValidationError("I did not copy&return all records for {}? ({}/{})\nrecords: {}\n\nresult: {}".format(
@@ -490,10 +502,10 @@ class ImportModelHandler():
 			self.modelName, len(self.toCreate)
 		))
 
-		objectSetMapped = self.__mapDependenciesOfRecords(self.toCreate, requiredOnly = True)
+		objectSetMapped = self.__mapRecords(self.toCreate, requiredDependenciesOnly = True)
 		recordsToCreate = list(objectSetMapped.values())
 
-		# __mapDependenciesOfRecords(requiredOnly = True) removed all non-required dependency fields (if any)...
+		# __mapRecords(requiredDependenciesOnly = True) removed all non-required dependency fields (if any)...
 		# ... put them into the 'update' stage (self.toUpdate)
 		optionalRelatedFields = self.fieldNamesWhereNot('required') & self.getRelFieldsToImport().keys()
 		updatesScheduled = 0
@@ -548,7 +560,7 @@ class ImportModelHandler():
 			self.modelName, len(self.toUpdate)
 		))
 
-		objectSetMapped = self.__mapDependenciesOfRecords(self.toUpdate, requiredOnly = False)
+		objectSetMapped = self.__mapRecords(self.toUpdate, requiredDependenciesOnly = False)
 		# map ids of objectSetMapped
 		mappedIds = list(map(self.idMap.get, map(self.__keySelect('id'), objectSetMapped)))
 		# locally fetch objects with mapped ids
