@@ -712,7 +712,6 @@ class ImportModelHandler():
 		# update local objects one by one
 		startTime = time.time()
 		processed = 0
-		failed = 
 		for remoteId, dataToUpdate in objectSetMapped.items():
 			localId = self.idMap[remoteId]
 			localObject = localObjects[localId]
@@ -788,14 +787,14 @@ class ImportModelHandler():
 					unresolvedIds.add(remoteId)
 
 			elif self.matchingStrategy == 'explicitKeys':
-				#FIXME: check if key is many2one -> needs to be resolved
+				#TODO: check if key is many2one(!) -> needs to be resolved
 				# cannotResolveRemoteRelationKey = False
 				# if relationKeyFieldsHandlers:
 				# 	remoteKeys = dict(remoteKeys)
 				# 	for fieldName, handler in relationKeyFieldsHandlers.items():
-				#		mappedId = handler.idMap.get(remoteKeys[fieldName])
-				#		if mappedId:
-				#			remoteKeys[fieldName] = mappedId
+				# 		mappedId = handler.idMap.get(remoteKeys[fieldName])
+				# 		if mappedId:
+				# 			remoteKeys[fieldName] = mappedId
 				# 		else:
 				# 			# the remote relation key is not resolveable (yet) so this object is unresolved too
 				# 			cannotResolveRemoteRelationKey = True
