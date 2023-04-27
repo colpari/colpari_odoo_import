@@ -68,6 +68,7 @@
                 <tree>
                   <field name="name"/>
                   <field name="field_import_strategy"/>
+                  <field name="decimal_precision"/>
                   <field name="value_mappings" widget="many2many_tags"/>
                 </tree>
               </field>
@@ -90,6 +91,7 @@
 
               <field name="import_field"/>
               <field name="field_import_strategy"/>
+              <field name="decimal_precision"/>
             </group>
             <field name="value_mappings" context="{'default_field_config' : id}">
               <tree>

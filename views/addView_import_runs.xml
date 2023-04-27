@@ -55,7 +55,7 @@
       <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
       <field name="arch" type="xml">
         <form>
-          <sheet>
+          <!-- <sheet> -->
             <group>
               <field name="import_config"/>
               <field name="state"/>
@@ -64,7 +64,7 @@
               <field name="progress2" widget="progressbar" />
             </group>
             <field name="messages"/>
-          </sheet>
+          <!-- </sheet> -->
         </form>
       </field>
     </record>

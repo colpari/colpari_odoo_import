@@ -6,6 +6,7 @@ from odoo.exceptions import ValidationError, UserError
 import logging
 import xmlrpc.client
 import traceback
+import time
 
 _logger = logging.getLogger(__name__)
 _logLevelMap = {
@@ -15,6 +16,15 @@ _logLevelMap = {
 	'0_error' 	: logging.ERROR,
 }
 
+LOCAL_SCHEMA_OVERRIDE = {
+	'account.move.line' : {
+		'account_id' : { 'required' : True } # required for create
+	},
+	'product.template' : {
+		# this is a real circle. since product.template manages the product.product instances we make them non-required and ignore them
+		'product_variant_ids' : { 'required' : False }
+	}
+}
 
 class ImportException(Exception):
 	def __init__(self, message, **kwargs):
@@ -45,8 +55,10 @@ class ImportModelHandler():
 
 		self.remoteFields 		= {} 	# lazy fieldName -> properties
 		self.localFields 		= {} 	# lazy fieldName -> properties
+		self.remoteIdFields 	= None 	# [fn, fn, fn...]
 		self.fieldsToImport		= None 	# lazy set((fn, f))
 		self.relFieldsToImport	= None 	# lazy set((fn, f))
+		self.o2mFieldsWeImportTargetsOf = None # lazy set((fn, f))
 
 		self._fieldProperties	= { # lazy index of local field properties by propertyName
 			# propertyName : {
@@ -66,8 +78,21 @@ class ImportModelHandler():
 		self.toCreate		= {} 	# { remoteId : { k :v, k :v... } }
 		self.toUpdate		= {} 	# { remoteId : { k :v, k :v... } }
 
-	def __str__(self):
+		# keeps track of all remote key combinations to assure they are unique in the first place
+		self.remoteKeyUniquenessCheck = {} # {  kv1 : { kv2 : { k3v .. : set(remoteId) }}}
+
+	def __repr__(self):
 		return "<{} handler>".format(self.modelName)
+
+	def __keySelect(self, key):
+		return lambda x : x[key]
+
+	def __toDictionary(self, keyName, iterable):
+		result = {}
+		for x in iterable:
+			#TODO: assert keys unique?
+			result.setdefault(x[keyName], x)
+		return result
 
 	def hasImportStrategy(self, *strategies):
 		return self.importStrategy in strategies
@@ -85,7 +110,16 @@ class ImportModelHandler():
 
 	def getLocalFields(self):
 		if not self.localFields:
-			self.localFields = self.env[self.modelName].fields_get()
+			# make a copy of the field info because we inject data into it
+			self.localFields = {}
+			localOverrides = LOCAL_SCHEMA_OVERRIDE.get(self.modelName)
+			for fieldName, field in self.env[self.modelName].fields_get().items():
+				_field = dict(field)
+				fieldOverride = localOverrides and localOverrides.get(fieldName)
+				if fieldOverride:
+					_field.update(fieldOverride)
+				self.localFields[fieldName] = _field
+
 		return self.localFields
 
 	def getRemoteFields(self):
@@ -143,25 +177,49 @@ class ImportModelHandler():
 			self.fieldsToImport = {}
 			localFields = self.getLocalFields()
 			remoteFields = self.getRemoteFields()
-
+			followedNotified = set()
 			for fn, f in localFields.items():
 				if fn not in remoteFields:
 					continue
-				if f.get('relation') and not self.shouldFollowDependency(fn):
+				if f.get('related'):
 					continue
+				relatedTypeName = f.get('relation')
+				if relatedTypeName:
+					handler = self.shouldFollowDependency(fn)
+					if not handler:
+						continue
+					elif not handler.modelConfig and handler not in followedNotified:
+						# log message if relatedTypeName is not configured (we implicitly follow it) once
+						self.log(
+							'2_info', "following dependency {}::{} -> {}".format(self.modelName, fn, relatedTypeName),
+							modelName = self.modelName, fieldName = fn, dependencyType = relatedTypeName
+						)
+						followedNotified.add(handler) # log once only
+
 				self.fieldsToImport[fn] = f
 
 		return self.fieldsToImport
 
 	def getRelFieldsToImport(self):
 		if self.relFieldsToImport == None:
-			fieldsToImport = self.getFieldsToImport()
 			if not self.hasImportStrategy('import', 'dependency'):
 				raise Exception("Code path error. getRelFieldsToImport() called for strategy {}".format(strategy))
 
-			self.relFieldsToImport = { fn : f for fn, f in fieldsToImport.items() if f.get('relation')}
+			self.relFieldsToImport = {
+				fn : f for fn, f in self.getFieldsToImport().items() if f.get('relation')
+			}
 
 		return self.relFieldsToImport
+
+	def __getO2MFieldsWeImportTargetsOf(self):
+		if self.o2mFieldsWeImportTargetsOf == None:
+			self.o2mFieldsWeImportTargetsOf = {}
+			for fn, field in self.getRelFieldsToImport().items():
+				if (field.get('type') == 'one2many'
+				and self.CTX.getHandler(field['relation']).hasImportStrategy('import', 'dependency')):
+					self.o2mFieldsWeImportTargetsOf[fn] = field
+
+		return self.o2mFieldsWeImportTargetsOf
 
 	def _getPropertiesEntry(self, propertyName):
 		entry = self._fieldProperties.setdefault(propertyName, {})
@@ -230,7 +288,7 @@ class ImportModelHandler():
 				# NOTE: this mutates self.fieldsToImport
 				# 	thus, this method is part of the is-proper-set-up path for this class
 				# 	and must be called right after all ImportModelHandler instances are created
-				del fieldsToImport[fieldName]
+				fieldsToImport.pop(fieldName, 0)
 
 			if required:
 				if ignored:
@@ -262,7 +320,8 @@ class ImportModelHandler():
 
 	def _getDependenciesOfRecords(self, records, requiredOnly):
 
-		result = {}
+		dependenciesPerTargetType = {}
+		dependenciesPerId = {}
 
 		relFieldNames = self.getRelFieldsToImport().keys()
 
@@ -278,14 +337,15 @@ class ImportModelHandler():
 
 			dependencyIds = set()
 			for remoteId, remoteRecord in records.items():
-				relationFieldValue = remoteRecord[relationFieldName]
+				relationFieldValue = remoteRecord.get(relationFieldName)
 				if relationFieldValue:
 					dependencyIds.update(relationFieldValue)
+					dependenciesPerId.setdefault(remoteId, {}).setdefault(relatedType, set()).update(relationFieldValue)
 
 			if dependencyIds:
-				result.setdefault(relatedType, set()).update(dependencyIds)
+				dependenciesPerTargetType.setdefault(relatedType, set()).update(dependencyIds)
 
-		return result
+		return (dependenciesPerTargetType, dependenciesPerId)
 
 	def __mapRecords(self, records, requiredDependenciesOnly):
 		''' - copy records and map remote ids in all relation fields to local ids
@@ -294,10 +354,6 @@ class ImportModelHandler():
 			- convert many2One fields to single values since we handle them as lists internally
 		'''
 		relFields = self.getRelFieldsToImport()
-
-		#NOTE: yes, this would be much faster if the outer loop is relFields and records is inner...
-		#		...but this way it has fewer border cases
-
 		result = {}
 		# copy all records
 		for remoteId, remoteRecord in records.items():
@@ -305,16 +361,16 @@ class ImportModelHandler():
 
 		for fieldName, field in self.getFieldsToImport().items():
 			if fieldName in relFields:
-				# relation field
+			# relation field
 				if requiredDependenciesOnly and not field.get('required'):
 					# remove non-required relations if requested
 					for remoteRecord in result.values():
-						del remoteRecord[fieldName]
+						remoteRecord.pop(fieldName, 0)
 				else:
 					# map relation field
 					relatedType = self.shouldFollowDependency(fieldName) # should never be False here
 					for remoteRecord in result.values():
-						relationFieldValue = remoteRecord[fieldName]
+						relationFieldValue = remoteRecord.get(fieldName)
 						if relationFieldValue:
 							mappedIds = list(map(relatedType.idMap.__getitem__, relationFieldValue))
 							remoteRecord[fieldName] = (
@@ -325,13 +381,20 @@ class ImportModelHandler():
 
 
 			else:
-				# normal field
+			# normal field
 				fc = self.getFieldConfig(fieldName)
 				defaultValue = fc and fc.mapsToDefaultValue()
+				decimalPrecision = fc and fc.decimal_precision
 				if defaultValue:
-					# set default value for all records
+					# apply default value for all records
 					for remoteRecord in result.values():
 						remoteRecord[fieldName] = defaultValue
+				if decimalPrecision:
+					# round values for all records
+					for remoteRecord in result.values():
+						value = remoteRecord.get(fieldName)
+						if value:
+							remoteRecord[fieldName] = round(value, decimalPrecision)
 
 		if len(records) != len(result): # sanity check
 			raise ValidationError("I did not copy&return all records for {}? ({}/{})\nrecords: {}\n\nresult: {}".format(
@@ -340,42 +403,65 @@ class ImportModelHandler():
 
 		return result
 
-	def __removeResolvedDependenciesFrom(self, dependencies):
+	def __removeResolvedDependenciesFrom(self, dependenciesPerTargetType, dependenciesPerId = None):
 		# see which ones are completely resolved and remove them
-		for handler, dependencyIds in dict(dependencies).items():
+		for handler, dependencyIds in dict(dependenciesPerTargetType).items():
 			(yes, no) = handler.resolve(dependencyIds)
-			if not no: # all resolved
-				del dependencies[handler]
+			if not no:
+			# all resolved
+				del dependenciesPerTargetType[handler]
+				if dependenciesPerId:
+					for remoteId, dependencyInfo in dependenciesPerId.items():
+						dependencyInfo.pop(handler, 0)
+			elif yes and dependenciesPerId:
+			# at lease some are resolved. remove from dependenciesPerId
+				for remoteId, dependencyInfo in dependenciesPerId.items():
+					_deps = dependencyInfo.get(handler)
+					if _deps:
+						_deps.difference_update(yes) # remove resolved
+						if not _deps: # all resolved
+							del dependencyInfo[handler]
+
+		# remove (now) empty entries from dependenciesPerId
+		if dependenciesPerId:
+			for remoteId, dependencyInfo in dict(dependenciesPerId.items()).items():
+				if not dependencyInfo:
+					del dependenciesPerId[remoteId]
 
 	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
 		# fetch remote data
 		remoteData = self.readRemoteData(remoteIds)
 
 		#TODO: are there cases where we could go with requiredOnly = True and thus save time?
-		dependencies = self._getDependenciesOfRecords(remoteData, requiredOnly = False)
+		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(remoteData, requiredOnly = False)
 
-		for _type, ids in dependencies.items():
+		for _type, ids in dependenciesPerTargetType.items():
 			dependencyIdsToResolve.setdefault(_type, set()).update(ids)
 
 		return remoteData
 
 	def _getRemoteIdFields(self):
 		''' determines the required fields for identifying the remote models  '''
+		if self.remoteIdFields == None:
+			if self.matchingStrategy == 'odooName':
+				self.remoteIdFields = { 'display_name' }
+				if 'name' in self.getRemoteFields():
+					self.remoteIdFields.add('name')
 
-		if self.matchingStrategy == 'odooName':
-			fieldsToRead = { 'display_name', 'id' }
-			if 'name' in self.getRemoteFields():
-				fieldsToRead.add('name')
+			elif self.matchingStrategy == 'explicitKeys':
+				self.remoteIdFields = self.modelConfig.getConfiguredKeyFieldNames()
+				if not self.remoteIdFields:
+					raise UserError("Model type {} has matching strategy 'explicitKey' but no key fields are configured")
 
-		elif self.matchingStrategy == 'explicitKeys':
-			fieldsToRead = self.modelConfig.getConfiguredKeyFieldNames()
-			if not fieldsToRead:
-				raise UserError("Model type {} has matching strategy 'explicitKey' but no key fields are configured")
+				unimportedKeyFields = self.remoteIdFields - self.getFieldsToImport().keys()
+				if unimportedKeyFields:
+					raise ImportException("The fields {} of type {} are configured as key but not to be imported".format(
+						unimportedKeyFields, self.modelName
+					))
+			else:
+				raise Exception("Model matching strategy '{}' is not supported for {}".format(self.matchingStrategy, self.modelName))
 
-		else:
-			raise Exception("Model matching strategy '{}' is not supported for {}".format(self.matchingStrategy, self.modelName))
-
-		return fieldsToRead
+		return self.remoteIdFields
 
 	def __nameSearch(self, keyName, value):
 		if not value:
@@ -397,7 +483,7 @@ class ImportModelHandler():
 
 	def status(self):
 		checkSum = set(self.idMap.keys()) ^ (self.keyMaterial and self.keyMaterial.keys() or set()) ^ self.toUpdate.keys() ^ self.toCreate.keys()
-		return "{} ({}/{}): {} keys, {} resolved, {} to update, {} to create (checkSum={})".format(
+		return "{} \t({}/{}): \t{} keys, \t{} resolved, \t{} to update, \t{} to create \t(checkSum={})".format(
 			self.modelName, self.importStrategy, self.matchingStrategy,
 			len(self.keyMaterial or []), len(self.idMap), len(self.toUpdate), len(self.toCreate), len(checkSum)
 		)
@@ -431,6 +517,7 @@ class ImportModelHandler():
 			idsToImport = idsToImport - self.toCreate.keys() - self.toUpdate.keys() - self.idMap.keys()
 
 			if idsToImport:
+				# read ids to import and put into toCreate/toUpdate
 				remoteData = self._readRemoteDataAndCollectDepenencies(idsToImport, dependencyIdsToResolve)
 				for remoteId, remoteRecord in remoteData.items():
 					if remoteId in unresolvedIds:
@@ -467,64 +554,86 @@ class ImportModelHandler():
 		else:
 			raise Exception("Unhandled model import strategy '{}' for {}".format(self.importStrategy, self.modelName))
 
-	def __keySelect(self, key):
-		return lambda x : x[key]
-
-	def __toDictionary(self, keyName, iterable):
-		result = {}
-		for x in iterable:
-			#TODO: assert keys unique?
-			result.setdefault(x[keyName], x)
-		return result
-
 	def tryCreate(self):
-
 		if not self.toCreate:
 			return True
 
-		dependencies = self._getDependenciesOfRecords(self.toCreate, requiredOnly = True)
+		# remove data from o2m-fields if we also import the target type of
+		# we needed to read this to discover all dependencies but for writing these relations should be written by
+		# the corresponding m2o-field
+		o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
+		if o2mFieldsWeImportTargetsOf:
+			for remoteRecord in self.toCreate.values():
+				for fn in o2mFieldsWeImportTargetsOf.keys():
+					remoteRecord.pop(fn, 0)
 
-		if dependencies:
-			_logger.info("{} create dependencies 1:\n{}".format(self.modelName, dependencies))
+		# fetch dependencies of self.toCreate
+		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(self.toCreate, requiredOnly = True)
+		# remove resolved dependencies
+		self.__removeResolvedDependenciesFrom(dependenciesPerTargetType, dependenciesPerId)
 
-		self.__removeResolvedDependenciesFrom(dependencies)
+		# check which objects are fully resolved now and can be created
+		_toCreate = { }
+		_toTryLater = {}
 
-		# any unresolved dependencies left?
-		if dependencies:
-			# we cannot write
-			_logger.info("{} has unresolved dependencies to {} objects of {} types".format(
-				self.modelName, sum(map(lambda x: len(x), dependencies.values())), len(dependencies.keys())
+		for remoteId, remoteRecord in self.toCreate.items():
+			if remoteId in dependenciesPerId:
+				# has unresolved dependencies
+				_toTryLater[remoteId] = remoteRecord
+			else:
+				_toCreate[remoteId] = remoteRecord
+
+		if not _toCreate:
+			# unable to write anything
+			_logger.info("{} has unresolved dependencies to {} objects of types {}".format(
+				self.modelName, sum(map(lambda x: len(x), dependenciesPerTargetType.values())), list(dependenciesPerTargetType.keys())
 			))
 			return False
 
-		# nope - let's go!
-		_logger.info("{} create RESOLVE (mandatory) COMPLETE, writing {} records".format(
-			self.modelName, len(self.toCreate)
+		# we can at least write some records
+		_logger.info("{} creating {}/{} records".format(
+			self.modelName, len(_toCreate), len(self.toCreate)
 		))
 
-		objectSetMapped = self.__mapRecords(self.toCreate, requiredDependenciesOnly = True)
+		objectSetMapped = self.__mapRecords(_toCreate, requiredDependenciesOnly = True)
 		recordsToCreate = list(objectSetMapped.values())
 
 		# __mapRecords(requiredDependenciesOnly = True) removed all non-required dependency fields (if any)...
 		# ... put them into the 'update' stage (self.toUpdate)
-		optionalRelatedFields = self.fieldNamesWhereNot('required') & self.getRelFieldsToImport().keys()
+		optionalRelatedFields = (
+			(self.fieldNamesWhereNot('required') & self.getRelFieldsToImport().keys())
+		  - o2mFieldsWeImportTargetsOf.keys()
+		 )
+
 		updatesScheduled = 0
 		if optionalRelatedFields:
-			for remoteId, unMappedRecord in self.toCreate.items():
+			for remoteId, unMappedRecord in _toCreate.items():
 				if remoteId in self.toUpdate: # sanity check
 					raise ValidationError("{} remote id {} should not yet be present in self.toUpdate".format(
 						self.modelName, remoteId
 					))
 
-				updateData = self.toUpdate[remoteId] = {'id' : remoteId}
+				updateData = {}
 
-				#NOTE: using copy of UNmapped value for later update (because it will map again)
 				for fn in optionalRelatedFields:
-					updateData[fn] = list(unMappedRecord[fn])
+					#NOTE: using copy of UNmapped value for later update (because it will map again)
+					unmappedValue = unMappedRecord[fn]
+					if unmappedValue:
+						updateData[fn] = list(unmappedValue)
 
-				updatesScheduled+=1
+				if not updateData:
+					# all relfields are empty
+					pass
+				else:
+					self.toUpdate[remoteId] = updateData
+					updatesScheduled+=1
 
-		createResult = self.env[self.modelName].create(recordsToCreate)
+		try:
+			createResult = self.env[self.modelName].create(recordsToCreate)
+		except Exception as e:
+			_logger.info("create FAILED:\n{}".format(recordsToCreate[:3000]))
+			raise e
+
 		if len(recordsToCreate) != len(createResult): # sanity check
 			raise ValidationError("Got {} created records when trying to create {}".format(
 				len(createResult), len(recordsToCreate)
@@ -532,37 +641,66 @@ class ImportModelHandler():
 		# add ids of newly created records to idMap
 		# NOTE: this assumes model.create() returns the created records in the same order as the supplied data.
 		#		which proves to be true for odoo 14 and 15 at least :-}
+		# NOTE: this also depends on the fact that we can leave the remoteId in the 'id'-field when calling create to
+		# 		have it for updating self.idMap below
 		# FIXME: unit test
 		i = 0
 		for created in createResult:
 			self.idMap[recordsToCreate[i]['id']] = created['id']
 			i+=1
 
-		_logger.info("CREATED {} {} records ({} updates scheduled)".format(len(recordsToCreate), self.modelName, updatesScheduled))
-		self.toCreate.clear()
+		_logger.info("CREATED {}/{} {} records ({} updates scheduled)".format(
+			len(recordsToCreate), len(self.toCreate), self.modelName, updatesScheduled
+		))
+
+		self.toCreate = _toTryLater
 		return len(createResult) # return True/number of objects changed
+
+	def __wouldBeChangedBy(self, localObject, remoteValues):
+		''' returns True if remoteValues contains any values not present in localObject '''
+		wouldChange = False
+		for fn, value in remoteValues.items():
+			field = self.getLocalFields()[fn]
+			isRelation = field.get('relation')
+			isMany2One = field.get('type') == 'many2one'
+			localValue = localObject[fn]
+			if isMany2One:
+				localValue = localValue.id
+			elif isRelation:
+				localValue = localValue.ids
+
+			if isRelation and not isMany2One:
+				if (set(localValue) ^ set(value)):
+					wouldChange = True
+			else:
+				if localValue != value:
+					wouldChange = True
+
+		return wouldChange
 
 	def tryUpdate(self):
 		if not self.toUpdate:
 			return True
 
-		dependencies = self._getDependenciesOfRecords(self.toUpdate, requiredOnly = False)
-		self.__removeResolvedDependenciesFrom(dependencies)
+		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(self.toUpdate, requiredOnly = False)
+		self.__removeResolvedDependenciesFrom(dependenciesPerTargetType)
 
 		# any unresolved dependencies left?
-		if dependencies:
+		if dependenciesPerTargetType:
 			# we cannot write
-			raise ValidationError("Unresolved dependencies in update stage for {}?\n{}".format(self.modelName, dependencies))
+			raise ValidationError("Unresolved dependencies in update stage for {}?\n{}".format(
+				self.modelName, dependenciesPerTargetType
+			))
 			#return False
 
 		# nope - let's go!
-		_logger.info("{} update RESOLVE COMPLETE, writing {} records".format(
+		_logger.info("{} updating {} records".format(
 			self.modelName, len(self.toUpdate)
 		))
 
 		objectSetMapped = self.__mapRecords(self.toUpdate, requiredDependenciesOnly = False)
 		# map ids of objectSetMapped
-		mappedIds = list(map(self.idMap.get, map(self.__keySelect('id'), objectSetMapped)))
+		mappedIds = list(map(self.idMap.__getitem__, objectSetMapped.keys()))
 		# locally fetch objects with mapped ids
 		localObjects = self.__toDictionary('id',
 			self.env[self.modelName].browse(mappedIds)
@@ -570,10 +708,37 @@ class ImportModelHandler():
 		# check size
 		if len(localObjects) != len(self.toUpdate): # sanity check
 			raise ValidationError("Got {} local objects when browsing for {} ids".format(len(localObjects), len(self.toUpdate)))
-		# loop and update local objects per id
-		for remoteId, dataToUpdate in objectSetMapped:
+
+		# update local objects one by one
+		startTime = time.time()
+		processed = 0
+		failed = 
+		for remoteId, dataToUpdate in objectSetMapped.items():
 			localId = self.idMap[remoteId]
-			localObjects[localId].update(dataToUpdate)
+			localObject = localObjects[localId]
+			try:
+				if self.__wouldBeChangedBy(localObject, dataToUpdate):
+					# only call update if we really have new values
+					localObject.update(dataToUpdate)
+				#localObject.write(dataToUpdate)
+				# since we update one object at a time and it takes ages, log a message every 10 seconds
+				processed += 1
+				now = time.time()
+				if (now - startTime) > 10:
+					startTime = now
+					_logger.info("{} update wrote {} of {} records".format(
+						self.modelName, processed, len(objectSetMapped)
+					))
+
+			except Exception as e:
+				currentObjContent = str(
+					{ fn : localObject[fn] for fn in localObject._fields.keys() }
+				)
+				raise ImportException("update for {}.{} (remoteId={}) with data {} FAILED: {}\ncurrent content:{}".format(
+						self.modelName, localId, remoteId, dataToUpdate, e, currentObjContent
+					),
+					modelName = self.modelName
+				)
 
 		recordsWritten = len(self.toUpdate)
 
@@ -585,6 +750,12 @@ class ImportModelHandler():
 		theEnv 			= self.env[self.modelName]
 		resolvedIds 	= set()
 		unresolvedIds 	= set()
+
+		relationKeyFieldsHandlers = {} # for fast access to handlers of id fields which are relations
+		for idFieldName in self._getRemoteIdFields():
+			relatedType = self.getLocalFields()[idFieldName].get('relation')
+			if relatedType:
+				relationKeyFieldsHandlers[idFieldName] = self.CTX.getHandler(relatedTypeName)
 
 		for remoteId in ids:
 			if remoteId in self.idMap:
@@ -617,12 +788,29 @@ class ImportModelHandler():
 					unresolvedIds.add(remoteId)
 
 			elif self.matchingStrategy == 'explicitKeys':
+				#FIXME: check if key is many2one -> needs to be resolved
+				# cannotResolveRemoteRelationKey = False
+				# if relationKeyFieldsHandlers:
+				# 	remoteKeys = dict(remoteKeys)
+				# 	for fieldName, handler in relationKeyFieldsHandlers.items():
+				#		mappedId = handler.idMap.get(remoteKeys[fieldName])
+				#		if mappedId:
+				#			remoteKeys[fieldName] = mappedId
+				# 		else:
+				# 			# the remote relation key is not resolveable (yet) so this object is unresolved too
+				# 			cannotResolveRemoteRelationKey = True
+				# 			break
+
+				# if cannotResolveRemoteRelationKey:
+				# 	unresolvedIds.add(remoteId)
+				# 	continue
+
 				domain = [
 					[fn, '=', fv] for fn, fv in remoteKeys.items()
 				]
 				localEntry = theEnv.search(domain)
 				if len(localEntry) < 1:
-					unresolvedIds(remoteId)
+					unresolvedIds.add(remoteId)
 
 				elif len(localEntry) == 1:
 					self.idMap[remoteId] = localEntry.id
@@ -664,27 +852,44 @@ class ImportModelHandler():
 		if self.keyMaterial == None:
 			self.keyMaterial = {}
 
-		ids2Fetch = (ids and set(ids)) or ids
+		ids2Fetch = (ids and set(ids)) or ids #NOTE: ids2Fetch may be None here and stay None in a read-all case
+
 		if ids2Fetch and self.keyMaterial: # specific ids given and we already have key data. fetch incremental
-			ids2Fetch = set(filter(lambda i : i not in self.keyMaterial, ids)) # check which ones we don't have
-			if not ids2Fetch:
-				return ids # all present
+			ids2Fetch = ids2Fetch - self.keyMaterial.keys() # check which ones we don't have
+			if not ids2Fetch: # all present
+				return ids or set(self.keyMaterial.keys())
 
 		idFieldNames = self._getRemoteIdFields()
 		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.log, ids = ids2Fetch) #TODO: add remote consideration domain
 
-		_logger.info("fetchRemoteKeys() : read idFields of {} remote records (from {} ids) of type {}".format(
-			len(records), len(ids2Fetch or []), self.modelName)
-		)
+		# _logger.info("fetchRemoteKeys() : read idFields of {} remote records (from {} ids) of type {}".format(
+		# 	len(records), len(ids2Fetch or []), self.modelName)
+		# )
 
 		if ids2Fetch and (len(ids2Fetch) != len(records)):
 			raise Exception("Short read of {} items while trying to get remote names of {} models of type {}".format(
 				len(records), len(ids), self.modelName)
 			)
 
+		#FIXME: whenever we fetched something. check that *remote* keys are (still) unique
+
+
 		for record in records:
+			remoteId = record['id']
+
 			# build index
-			self.keyMaterial[record['id']] = record
+			self.keyMaterial[remoteId] = record
+			del record['id']
+
+			# check uniqueness. create key values path in remote self.remoteKeyUniquenessCheck
+			node = self.remoteKeyUniquenessCheck
+			for fn in idFieldNames:
+				node = node.setdefault(record[fn], {})
+			node[remoteId] = 1
+			if len(node) > 1:
+				_logger.warning("{} : multiple remote object ids ({}) have the same set of keys ({})".format(
+					self.modelName, node.keys(), record
+				))
 
 			# NOTE: sanity check of field names in record...
 			if idFieldNames ^ record.keys():
@@ -694,8 +899,6 @@ class ImportModelHandler():
 					"Key info for {}::{} has non-matching fields. Expected {}".format(
 						self.modelName, record, idFieldNames
 				))
-
-			#_logger.info("remote keys {}::{} = {}".format(self.modelName, record['id'], x))
 
 		return ids or set(self.keyMaterial.keys())
 

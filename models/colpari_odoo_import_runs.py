@@ -82,7 +82,6 @@ class ImportContext():
 		for handler in list(self._handlers.values()):
 			handler.checkConfig()
 
-
 	def getHandler(self, modelName):
 		h = self._handlers.get(modelName)
 		if not h:
@@ -114,8 +113,10 @@ class ImportContext():
 			# handler : set(ids)
 		}
 
+		configuredHandlers = list(self.getConfiguredHandlers())
+
 		# first pass. fetch all import types and collect dependencies
-		for handler in self.getConfiguredHandlers():
+		for handler in configuredHandlers:
 			if handler.importStrategy != 'import':
 				continue
 
@@ -134,7 +135,7 @@ class ImportContext():
 				if not dependencyIds: # sanity check
 					raise Exception("Empty dependency list")
 
-				_logger.info("{} phase 0 pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
+				_logger.info("{} reading phase pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
 
 				handler.readIncremental(dependencyIds, dependencyIdsToResolve)
 
@@ -151,22 +152,26 @@ class ImportContext():
 			while not finished:
 				_pass+=1
 				finished = True
-				anyHandlerHasWritten = False
+				handlersSucceeded = 0
 
-				for handler in self.getConfiguredHandlers():
-					if not (handler.toCreate if IS_CREATE else handler.toUpdate):
+				for handler in configuredHandlers:
+					dataToProcess = (handler.toCreate if IS_CREATE else handler.toUpdate)
+					if not dataToProcess:
 						# nothing to do (anymore) for this type
 						continue
-					if (handler.tryCreate() if IS_CREATE else handler.tryUpdate()):
+					processedCount = handler.tryCreate() if IS_CREATE else handler.tryUpdate()
+					if processedCount:
 						# we created the objects of this type. progess! :)
-						anyHandlerHasWritten = True
-					else:
-						# could not write these objects (yet)
+						handlersSucceeded += 1
+					if processedCount < len(dataToProcess):
+						# but not all objects (yet)
 						finished = False
 
-				_logger.info("phase {} pass #{}, {} objects written".format(phaseName, _pass, objectsWritten))
+				_logger.info("phase {} pass #{}, {}/{} handlers succeeded, finished={}".format(
+					phaseName, _pass, handlersSucceeded, len(configuredHandlers), finished
+				))
 
-				if not anyHandlerHasWritten:
+				if not handlersSucceeded:
 					self.__logHandlerStatus()
 					raise ValidationError("Nothing found writeable in {} pass #{}".format(phaseName, _pass))
 
@@ -257,6 +262,19 @@ class colpariOdooImportRun(models.Model):
 			'model_name' : modelName, 'field_name' : fieldName, 'dependency_type' : dependencyType
 		}])
 
+	def _copyMessages(self):
+		''' copy objects from our 'messages' field to dictionaries so we can save them again after a rollback '''
+		self.ensure_one()
+		result = [
+				{ fn : message[fn] for fn in self.messages._fields.keys() }
+			for message in self.messages
+		]
+		#print(result)
+		for message in result:
+			message['import_run'] = message['import_run'].id
+
+		return result
+
 	def prepare(self):
 		self.ensure_one()
 		self.progress1 = 0
@@ -268,18 +286,27 @@ class colpariOdooImportRun(models.Model):
 			theImport = ImportContext(self)
 			theImport.doMatching()
 			_logger.info("\n\n============= SUCCESSSSSSS =============\n\n")
+			savedMessages = self._copyMessages()
 			self.env.cr.rollback()
+			self.messages.unlink()
+			self.messages.create(savedMessages)
 
 		except ImportException as ie:
-			self.env.cr.rollback()
 			txt = traceback.format_exc()
 			#self._log('0_error', str(ie), **ie.kwargs)
+			#self._log('0_error', str(ie), **ie.kwargs)
+			savedMessages = self._copyMessages()
+			self.env.cr.rollback()
+			self.messages.unlink()
+			self.messages.create(savedMessages)
 			self._log('0_error', txt, **ie.kwargs)
 			self.state = 'failed'
 
 		except Exception as e:
-			self.env.cr.rollback()
 			txt = traceback.format_exc()
+			savedMessages = self._copyMessages()
+			self.env.cr.rollback()
+			self.messages.unlink()
+			self.messages.create(savedMessages)
 			self._log('0_error', txt)
 			self.state = 'failed'
-			return None

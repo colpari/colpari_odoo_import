@@ -34,6 +34,8 @@ class colpariOdooImport(models.Model):
 
 	only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=True)
 
+	#TODO: implement options for only importing unarchived records globally and per model
+
 	def getModelConfig(self, modelName):
 		self.ensure_one()
 		result = self.model_configs.filtered(lambda r: r.import_model_name == modelName)
@@ -127,6 +129,7 @@ class colpariOdooImportModelConfig(models.Model):
 		return self.field_configs.filtered(lambda fc : fc.field_import_strategy == 'key')
 
 	def getConfiguredKeyFieldNames(self):
+		''' returns a resh set with all explicit key field names '''
 		return set(self.getConfiguredKeyFields().mapped('import_field.name'))
 
 
@@ -134,6 +137,7 @@ class colpariOdooImportFieldConfig(models.Model):
 	_name = 'colpari.odoo_import_fieldconfig'
 	_description = 'Import configuration for a certain model field'
 
+	_order = 'field_import_strategy DESC'
 	_sql_constraints = [(
 		'field_config_uniq', 'unique(model_config, import_field)',
 		'Multiple configurations for the same field in one import model configuration are not allowed'
@@ -161,6 +165,8 @@ class colpariOdooImportFieldConfig(models.Model):
 	], default='import', required=True)
 
 	value_mappings = fields.One2many('colpari.odoo_import_fieldmapping', 'field_config')
+
+	decimal_precision = fields.Integer()
 
 	def mapsToDefaultValue(self):
 		''' returns the local value to map to iff there is exactly one mapping with an empty remote value '''
