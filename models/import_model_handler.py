@@ -406,8 +406,8 @@ class ImportModelHandler():
 	def __removeResolvedDependenciesFrom(self, dependenciesPerTargetType, dependenciesPerId = None):
 		# see which ones are completely resolved and remove them
 		for handler, dependencyIds in dict(dependenciesPerTargetType).items():
-			(yes, no) = handler.resolve(dependencyIds)
-			if not no:
+			(yes, no, pending) = handler.resolve(dependencyIds)
+			if not (no or pending):
 			# all resolved
 				del dependenciesPerTargetType[handler]
 				if dependenciesPerId:
@@ -503,10 +503,10 @@ class ImportModelHandler():
 
 		elif self.importStrategy == 'import':
 			self.fetchRemoteKeys(ids)
-			(resolvedIds, unresolvedIds) = self.resolve(ids)
+			(resolvedIds, unresolvedIds, pendingIds) = self.resolve(ids)
 
 			# determine which remote objects we need to read
-			idsToImport = set()
+			idsToImport = set(pendingIds)
 
 			if self.modelConfig.do_create:
 				idsToImport.update(unresolvedIds)
@@ -520,7 +520,7 @@ class ImportModelHandler():
 				# read ids to import and put into toCreate/toUpdate
 				remoteData = self._readRemoteDataAndCollectDepenencies(idsToImport, dependencyIdsToResolve)
 				for remoteId, remoteRecord in remoteData.items():
-					if remoteId in unresolvedIds:
+					if remoteId in unresolvedIds or remoteId in pendingIds:
 						self.toCreate[remoteId] = remoteRecord
 					elif remoteId in resolvedIds:
 						self.toUpdate[remoteId] = remoteRecord
@@ -532,8 +532,8 @@ class ImportModelHandler():
 						)
 		elif self.importStrategy == 'match':
 			self.fetchRemoteKeys(ids)
-			(resolvedIds, unresolvedIds) = self.resolve(ids)
-			# all must be resolved
+			(resolvedIds, unresolvedIds, pendingIds) = self.resolve(ids)
+			# all must be resolved or pending
 			if unresolvedIds:
 				someUnresolvedKeys = map(self.keyMaterial.get, list(unresolvedIds)[:30])
 				raise ImportException(
@@ -554,18 +554,39 @@ class ImportModelHandler():
 		else:
 			raise Exception("Unhandled model import strategy '{}' for {}".format(self.importStrategy, self.modelName))
 
-	def tryCreate(self):
-		if not self.toCreate:
-			return True
-
+	def __createIntro(self):
+		''' preparations before the actual create run '''
 		# remove data from o2m-fields if we also import the target type of
-		# we needed to read this to discover all dependencies but for writing these relations should be written by
+		# we needed to read this to discover all dependencies but for writing, these relations should be written by
 		# the corresponding m2o-field
+		# FIXME: this needs only to be done at the first create run
 		o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
 		if o2mFieldsWeImportTargetsOf:
 			for remoteRecord in self.toCreate.values():
 				for fn in o2mFieldsWeImportTargetsOf.keys():
 					remoteRecord.pop(fn, 0)
+
+		# update us with the actual rsolving situation four ourselves. it might still to be decided if some objects get
+		# created or updated
+		(resolvedIds, unresolvedIds, pendingIds) = self.resolve(self.toCreate.keys())
+		for resolvedId in resolvedIds: # resolved ones go to update
+			if resolvedId in self.toUpdate: raise Exception(
+				"{} id {} should not yet be present in self.toUpdate()".format(self.modelName, resolvedId)
+			)
+			self.toUpdate[resolvedId] = self.toCreate[resolvedId]
+
+		return pendingIds
+
+	def tryCreate(self):
+
+		if not self.toCreate:
+			return True
+
+		pendingIds = self.__createIntro()
+		if pendingIds:
+			_logger.info("{} has {} pending ids".format(self.modelName, len(pendingIds)))
+			return False
+
 
 		# fetch dependencies of self.toCreate
 		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(self.toCreate, requiredOnly = True)
@@ -602,7 +623,7 @@ class ImportModelHandler():
 		# ... put them into the 'update' stage (self.toUpdate)
 		optionalRelatedFields = (
 			(self.fieldNamesWhereNot('required') & self.getRelFieldsToImport().keys())
-		  - o2mFieldsWeImportTargetsOf.keys()
+		  - self.__getO2MFieldsWeImportTargetsOf().keys()
 		 )
 
 		updatesScheduled = 0
@@ -767,6 +788,7 @@ class ImportModelHandler():
 		theEnv 			= self.env[self.modelName]
 		resolvedIds 	= set()
 		unresolvedIds 	= set()
+		pendingIds		= set()
 
 		relationKeyFieldsHandlers = {} # for fast access to handlers of id fields which are relations
 		for idFieldName in self._getRemoteIdFields():
@@ -805,22 +827,26 @@ class ImportModelHandler():
 					unresolvedIds.add(remoteId)
 
 			elif self.matchingStrategy == 'explicitKeys':
-				#TODO: check if key is many2one(!) -> needs to be resolved
-				# cannotResolveRemoteRelationKey = False
-				# if relationKeyFieldsHandlers:
-				# 	remoteKeys = dict(remoteKeys)
-				# 	for fieldName, handler in relationKeyFieldsHandlers.items():
-				# 		mappedId = handler.idMap.get(remoteKeys[fieldName])
-				# 		if mappedId:
-				# 			remoteKeys[fieldName] = mappedId
-				# 		else:
-				# 			# the remote relation key is not resolveable (yet) so this object is unresolved too
-				# 			cannotResolveRemoteRelationKey = True
-				# 			break
+				# if explicitly configured keys contain relation fields the ids might stay pending until the remote
+				# relation field ids can be resolved
+				cannotResolveRemoteRelationKey = False
+				if relationKeyFieldsHandlers:
+					remoteKeys = dict(remoteKeys)
+					for fieldName, handler in relationKeyFieldsHandlers.items():
+						mappedId = handler.idMap.get(remoteKeys[fieldName])
+						if mappedId:
+							remoteKeys[fieldName] = mappedId
+						else:
+							# the remote relation key is not resolveable (yet) so this object is unresolved too
+							cannotResolveRemoteRelationKey = True
+							_logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
+								self.modelName, remoteKeys, remoteId, handler
+							))
+							break
 
-				# if cannotResolveRemoteRelationKey:
-				# 	unresolvedIds.add(remoteId)
-				# 	continue
+				if cannotResolveRemoteRelationKey:
+					pendingIds.add(remoteId)
+					continue
 
 				domain = [
 					[fn, '=', fv] for fn, fv in remoteKeys.items()
@@ -851,7 +877,7 @@ class ImportModelHandler():
 			raise Exception("Calculated id sets do not add up to the given id set:\ninput     : {}\nresolved  : {}\nunresolved:{}".format(
 				ids, resolvedIds, unresolvedIds
 			))
-		return (resolvedIds, unresolvedIds)
+		return (resolvedIds, unresolvedIds, pendingIds)
 
 	def fetchRemoteKeys(self, ids): #TODO: add remote consideration domain
 
@@ -887,9 +913,6 @@ class ImportModelHandler():
 			raise Exception("Short read of {} items while trying to get remote names of {} models of type {}".format(
 				len(records), len(ids), self.modelName)
 			)
-
-		#FIXME: whenever we fetched something. check that *remote* keys are (still) unique
-
 
 		for record in records:
 			remoteId = record['id']

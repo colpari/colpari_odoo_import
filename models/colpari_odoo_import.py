@@ -62,7 +62,7 @@ class colpariOdooImportModelConfig(models.Model):
 	_name = 'colpari.odoo_import_modelconfig'
 	_description = 'Import configuration for a certain model'
 
-	_order = 'model_import_strategy DESC'
+	_order = 'model_import_strategy DESC, import_model_name  ASC'
 	_sql_constraints = [(
 		'model_config_uniq', 'unique(import_config, import_model)',
 		'Multiple configurations for the same model in one import configuration are not allowed'
