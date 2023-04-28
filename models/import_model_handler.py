@@ -678,6 +678,24 @@ class ImportModelHandler():
 
 		return wouldChange
 
+	def __logUpdateObjectFailed(self, localId, localObject, remoteId, dataToUpdate, e):
+		currentObjContent = str(
+			{ fn : localObject[fn] for fn in localObject._fields.keys() }
+		)
+		msg = "update for {}.{} (remoteId={}) with data {} FAILED: {}\ncurrent content:{}".format(
+				self.modelName, localId, remoteId, dataToUpdate, e, currentObjContent
+			)
+
+		if localObject._name == 'account.move.line':
+			for line in localObject.move_id.line_ids:
+				msg+="\n{} cred={}, deb={}, bal={}".format(line, line.credit, line.debit, line.balance)
+			csum = sum(localObject.move_id.line_ids.mapped('credit'))
+			dsum = sum(localObject.move_id.line_ids.mapped('debit'))
+			bsum = sum(localObject.move_id.line_ids.mapped('debit'))
+			msg+="\ncsum={}, dsum={}, bsum={}, +/- c/d = {}".format(csum, dsum, bsum, csum-dsum)
+
+		return msg
+
 	def tryUpdate(self):
 		if not self.toUpdate:
 			return True
@@ -712,6 +730,7 @@ class ImportModelHandler():
 		# update local objects one by one
 		startTime = time.time()
 		processed = 0
+		failed = 0
 		for remoteId, dataToUpdate in objectSetMapped.items():
 			localId = self.idMap[remoteId]
 			localObject = localObjects[localId]
@@ -719,7 +738,8 @@ class ImportModelHandler():
 				if self.__wouldBeChangedBy(localObject, dataToUpdate):
 					# only call update if we really have new values
 					localObject.update(dataToUpdate)
-				#localObject.write(dataToUpdate)
+					#localObject.write(dataToUpdate)
+
 				# since we update one object at a time and it takes ages, log a message every 10 seconds
 				processed += 1
 				now = time.time()
@@ -730,14 +750,12 @@ class ImportModelHandler():
 					))
 
 			except Exception as e:
-				currentObjContent = str(
-					{ fn : localObject[fn] for fn in localObject._fields.keys() }
-				)
-				raise ImportException("update for {}.{} (remoteId={}) with data {} FAILED: {}\ncurrent content:{}".format(
-						self.modelName, localId, remoteId, dataToUpdate, e, currentObjContent
-					),
-					modelName = self.modelName
-				)
+				failed +=1
+				msg = self.__logUpdateObjectFailed(localId, localObject, remoteId, dataToUpdate, e)
+				if failed == 30:
+					raise ImportException(msg, modelName = self.modelName)
+				else:
+					_logger.error(msg)
 
 		recordsWritten = len(self.toUpdate)
 
