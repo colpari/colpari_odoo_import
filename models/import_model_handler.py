@@ -556,17 +556,17 @@ class ImportModelHandler():
 
 	def __createIntro(self):
 		''' preparations before the actual create run '''
-		# remove data from o2m-fields if we also import the target type of
-		# we needed to read this to discover all dependencies but for writing, these relations should be written by
-		# the corresponding m2o-field
-		# FIXME: this needs only to be done at the first create run
-		o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
-		if o2mFieldsWeImportTargetsOf:
-			for remoteRecord in self.toCreate.values():
-				for fn in o2mFieldsWeImportTargetsOf.keys():
-					remoteRecord.pop(fn, 0)
+		# # remove data from o2m-fields if we also import the target type of
+		# # we needed to read this to discover all dependencies but for writing, these relations should be written by
+		# # the corresponding m2o-field
+		# # FIXME: this needs only to be done at the first create run
+		# o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
+		# if o2mFieldsWeImportTargetsOf:
+		# 	for remoteRecord in self.toCreate.values():
+		# 		for fn in o2mFieldsWeImportTargetsOf.keys():
+		# 			remoteRecord.pop(fn, 0)
 
-		# update us with the actual rsolving situation four ourselves. it might still to be decided if some objects get
+		# update us with the actual resolving situation four ourselves. it might still to be decided if some objects get
 		# created or updated
 		(resolvedIds, unresolvedIds, pendingIds) = self.resolve(self.toCreate.keys())
 		for resolvedId in resolvedIds: # resolved ones go to update
@@ -652,7 +652,7 @@ class ImportModelHandler():
 		try:
 			createResult = self.env[self.modelName].create(recordsToCreate)
 		except Exception as e:
-			_logger.info("create FAILED:\n{}".format(recordsToCreate[:3000]))
+			_logger.info("create FAILED:\n{}".format(recordsToCreate[:300]))
 			raise e
 
 		if len(recordsToCreate) != len(createResult): # sanity check
@@ -756,10 +756,10 @@ class ImportModelHandler():
 			localId = self.idMap[remoteId]
 			localObject = localObjects[localId]
 			try:
-				if self.__wouldBeChangedBy(localObject, dataToUpdate):
-					# only call update if we really have new values
-					localObject.update(dataToUpdate)
-					#localObject.write(dataToUpdate)
+				# #if self.__wouldBeChangedBy(localObject, dataToUpdate):
+				# 	# only call update if we really have different values
+				# 	#localObject.update(dataToUpdate)
+				localObject.write(dataToUpdate)
 
 				# since we update one object at a time and it takes ages, log a message every 10 seconds
 				processed += 1

@@ -141,7 +141,6 @@ class ImportContext():
 
 		_logger.info("reading phase finished after {} iterations".format(i))
 
-		# logical test state passed!
 		#TODO: provide todo-info logged by below line more prominent(ly?) in UI
 		self.__logHandlerStatus()
 
@@ -286,10 +285,10 @@ class colpariOdooImportRun(models.Model):
 			theImport = ImportContext(self)
 			theImport.doMatching()
 			_logger.info("\n\n============= SUCCESSSSSSS =============\n\n")
-			savedMessages = self._copyMessages()
-			self.env.cr.rollback()
-			self.messages.unlink()
-			self.messages.create(savedMessages)
+			# savedMessages = self._copyMessages()
+			# self.env.cr.rollback()
+			# self.messages.unlink()
+			# self.messages.create(savedMessages)
 
 		except ImportException as ie:
 			txt = traceback.format_exc()
