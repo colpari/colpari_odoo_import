@@ -148,7 +148,6 @@ class ImportModelHandler():
 
 		relatedType = self.CTX.getHandler(relatedTypeName)
 		required = localField.get('required')
-		_type = localField.get('type')
 
 		if relatedType.importStrategy == 'ignore':
 			if required:
@@ -158,7 +157,7 @@ class ImportModelHandler():
 				))
 			return False
 
-		if _type == 'one2many':
+		if localField.get('type') == 'one2many':
 			# always follow one2many TODO: sure?/configurable?
 			return relatedType
 
@@ -181,8 +180,8 @@ class ImportModelHandler():
 			for fn, f in localFields.items():
 				if fn not in remoteFields:
 					continue
-				if f.get('related'):
-					continue
+				# if f.get('related'):
+				# 	continue
 				relatedTypeName = f.get('relation')
 				if relatedTypeName:
 					handler = self.shouldFollowDependency(fn)
@@ -268,6 +267,11 @@ class ImportModelHandler():
 		if self.hasImportStrategy('ignore', 'match'):
 			# check only types we read/write data of
 			return True
+
+		if self.modelConfig.model_remote_domain:
+			_logger.info("{} remote domain is '{}'".format(
+				self.modelName, self.modelConfig.model_remote_domain
+		))
 
 		# read remote model
 		remoteFields = self.getRemoteFields()
@@ -430,6 +434,8 @@ class ImportModelHandler():
 
 	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
 		# fetch remote data
+		if not remoteIds:
+			raise Exception("Empty id set")
 		remoteData = self.readRemoteData(remoteIds)
 
 		#TODO: are there cases where we could go with requiredOnly = True and thus save time?
@@ -463,24 +469,6 @@ class ImportModelHandler():
 
 		return self.remoteIdFields
 
-	def __nameSearch(self, keyName, value):
-		if not value:
-			# do not search for empty names
-			return None
-
-		localEntry = self.env[self.modelName].name_search(value, operator = '=')
-		if localEntry:
-			#_logger.info("__nameSearch({}, {}, {}) = {}".format(self.modelName, keyName, value, localEntry))
-			if len(localEntry) > 1:
-				raise ImportException(
-					"Remote {} '{}' for {} maps to multiple local names:\n{}".format(
-						keyName, value, self.modelName, localEntry
-				))
-
-			return localEntry[0]
-
-		return None
-
 	def status(self):
 		checkSum = set(self.idMap.keys()) ^ (self.keyMaterial and self.keyMaterial.keys() or set()) ^ self.toUpdate.keys() ^ self.toCreate.keys()
 		return "{} \t({}/{}): \t{} keys, \t{} resolved, \t{} to update, \t{} to create \t(checkSum={})".format(
@@ -506,7 +494,7 @@ class ImportModelHandler():
 			(resolvedIds, unresolvedIds, pendingIds) = self.resolve(ids)
 
 			# determine which remote objects we need to read
-			idsToImport = set(pendingIds)
+			idsToImport = set(pendingIds) #TODO: these might be (partially) unneeded, but we don't know yet
 
 			if self.modelConfig.do_create:
 				idsToImport.update(unresolvedIds)
@@ -594,7 +582,7 @@ class ImportModelHandler():
 		self.__removeResolvedDependenciesFrom(dependenciesPerTargetType, dependenciesPerId)
 
 		# check which objects are fully resolved now and can be created
-		_toCreate = { }
+		_toCreate = {}
 		_toTryLater = {}
 
 		for remoteId, remoteRecord in self.toCreate.items():
@@ -607,7 +595,7 @@ class ImportModelHandler():
 		if not _toCreate:
 			# unable to write anything
 			_logger.info("{} has unresolved dependencies to {} objects of types {}".format(
-				self.modelName, sum(map(lambda x: len(x), dependenciesPerTargetType.values())), list(dependenciesPerTargetType.keys())
+				self.modelName, sum(map(len, dependenciesPerTargetType.values())), list(dependenciesPerTargetType.keys())
 			))
 			return False
 
@@ -629,23 +617,22 @@ class ImportModelHandler():
 		updatesScheduled = 0
 		if optionalRelatedFields:
 			for remoteId, unMappedRecord in _toCreate.items():
-				if remoteId in self.toUpdate: # sanity check
-					raise ValidationError("{} remote id {} should not yet be present in self.toUpdate".format(
-						self.modelName, remoteId
-					))
-
 				updateData = {}
 
 				for fn in optionalRelatedFields:
 					#NOTE: using copy of UNmapped value for later update (because it will map again)
 					unmappedValue = unMappedRecord[fn]
 					if unmappedValue:
-						updateData[fn] = list(unmappedValue)
+						updateData[fn] = list(unmappedValue) # explicit copy
 
 				if not updateData:
 					# all relfields are empty
 					pass
 				else:
+					if remoteId in self.toUpdate: # sanity check
+						raise ValidationError("{} remote id {} should not yet be present in self.toUpdate".format(
+							self.modelName, remoteId
+						))
 					self.toUpdate[remoteId] = updateData
 					updatesScheduled+=1
 
@@ -784,7 +771,36 @@ class ImportModelHandler():
 		self.toUpdate.clear()
 		return recordsWritten
 
+	def __nameSearch(self, keyName, value, raiseOnMultiple):
+		if not value:
+			# do not search for empty names			
+			#return None
+			raise ImportException("{} empty key value for field '{}".format(
+				self.modelName, keyName), modelName = self.modelName
+			)
+
+		localEntry = self.env[self.modelName].name_search(value, operator = '=')
+		# if localEntry:
+		# 	#_logger.info("__nameSearch({}, {}, {}) = {}".format(self.modelName, keyName, value, localEntry))
+		if len(localEntry) > 1:
+			msg = "Remote {} '{}' for {} maps to multiple local names:\n{}".format(
+				keyName, value, self.modelName, localEntry
+			)
+			if raiseOnMultiple:
+				raise ImportException(msg, modelName = self.modelName)
+			else:
+				self.log("1_warning", msg, modelName = self.modelName)
+
+		# 	return localEntry[0]
+
+		return localEntry
+
 	def resolve(self, ids):
+		''' splits the provided id set in 3 distincs sets:
+				1. ids we know the local id for
+				2. ids not mappable to a local id
+				3. ids we don't yet know if they belong into set 1 or set 2
+		'''
 		theEnv 			= self.env[self.modelName]
 		resolvedIds 	= set()
 		unresolvedIds 	= set()
@@ -803,34 +819,32 @@ class ImportModelHandler():
 				continue
 
 			if self.importStrategy == 'dependency':
-				# dependency data is not resolved but is created elsewhere)
+				# dependency data is not resolved but is created elsewhere
+				# TODO: this could be optimized out of the per-id loop 
 				unresolvedIds.add(remoteId)
 				continue
 
 			remoteKeys = self.keyMaterial[remoteId]
 
-			#TODO: also check for empty key field values?
-			#TODO: issue warning if multiple remote keys map to the same local key
-
 			if self.matchingStrategy == 'odooName':
-				localEntry = (
-					self.__nameSearch('display_name', remoteKeys['display_name'])
-						or 'name' in remoteKeys and
-					self.__nameSearch('name', remoteKeys['name'])
-				)
+				localEntry = self.__nameSearch('display_name', remoteKeys['display_name'], raiseOnMultiple = False)
+
+				if (len(localEntry) != 1) and 'name' in remoteKeys:
+					localEntry = self.__nameSearch('name', remoteKeys['name'], raiseOnMultiple = True)
 
 				if localEntry:
 					self.idMap[remoteId] = localEntry[0]
-					_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry))
+					#_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry))
 					resolvedIds.add(remoteId)
 				else:
 					unresolvedIds.add(remoteId)
 
 			elif self.matchingStrategy == 'explicitKeys':
-				# if explicitly configured keys contain relation fields the ids might stay pending until the remote
-				# relation field ids can be resolved
+				# if explicitly configured keys contain relation fields the ids might
+				# have to stay pending until the relation field ids can be resolved
 				cannotResolveRemoteRelationKey = False
 				if relationKeyFieldsHandlers:
+					# copy the keys and try to map their relation id values
 					remoteKeys = dict(remoteKeys)
 					for fieldName, handler in relationKeyFieldsHandlers.items():
 						mappedId = handler.idMap.get(remoteKeys[fieldName])
@@ -848,6 +862,7 @@ class ImportModelHandler():
 					pendingIds.add(remoteId)
 					continue
 
+				# search for key locally
 				domain = [
 					[fn, '=', fv] for fn, fv in remoteKeys.items()
 				]
@@ -857,7 +872,7 @@ class ImportModelHandler():
 
 				elif len(localEntry) == 1:
 					self.idMap[remoteId] = localEntry.id
-					_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry.id))
+					#_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry.id))
 					resolvedIds.add(remoteId)
 
 				else:
@@ -881,6 +896,7 @@ class ImportModelHandler():
 
 	def fetchRemoteKeys(self, ids): #TODO: add remote consideration domain
 
+		domain = ''
 		if ids == None: # check if intended read of ALL remote objects...
 			if not self.hasImportStrategy('import', 'match'):
 				# ... makes sense ...
@@ -888,9 +904,11 @@ class ImportModelHandler():
 			if self.keyMaterial != None:
 				# ... and occurs initially only
 				raise Exception("fetchALLRemoteKeys() called twice or late for importStrategy '{}' of type {}".format(self.importStrategy, self.modelName))
+			# ok, this seems to be a valid discover-all case. add configured search domain
+
 		elif not ids:
-			# forbid empty key lists since they would lead to an implicit read-all
-			raise Exception("fetchALLRemoteKeys() called with empty set of ids")
+			# forbid empty key lists since this would be a non-explcit read-ALL
+			raise Exception("fetchRemoteKeys() called with empty set of ids. cowardly refusing to read ALL")
 
 		if self.keyMaterial == None:
 			self.keyMaterial = {}
@@ -903,7 +921,8 @@ class ImportModelHandler():
 				return ids or set(self.keyMaterial.keys())
 
 		idFieldNames = self._getRemoteIdFields()
-		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.log, ids = ids2Fetch) #TODO: add remote consideration domain
+		#TODO: add remote consideration domain
+		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.log, ids = ids2Fetch)
 
 		# _logger.info("fetchRemoteKeys() : read idFields of {} remote records (from {} ids) of type {}".format(
 		# 	len(records), len(ids2Fetch or []), self.modelName)
@@ -922,14 +941,15 @@ class ImportModelHandler():
 			del record['id']
 
 			# check uniqueness. create key values path in remote self.remoteKeyUniquenessCheck
+			#TODO: also check for empty key field values?
 			node = self.remoteKeyUniquenessCheck
 			for fn in idFieldNames:
 				node = node.setdefault(record[fn], {})
 			node[remoteId] = 1
 			if len(node) > 1:
-				_logger.warning("{} : multiple remote object ids ({}) have the same set of keys ({})".format(
-					self.modelName, node.keys(), record
-				))
+				raise ImportException("{} : multiple remote object ids {} have the same set of keys ({})".format(
+					self.modelName, list(node.keys()), record
+				), modelName = self.modelName)
 
 			# NOTE: sanity check of field names in record...
 			if idFieldNames ^ record.keys():
@@ -942,7 +962,7 @@ class ImportModelHandler():
 
 		return ids or set(self.keyMaterial.keys())
 
-	def readRemoteData(self, ids): #TODO: add remote consideration domain
+	def readRemoteData(self, ids):
 		''' reads to-be-imported data for a model from remote into self.remoteData '''
 		if not ids:
 			# # sanity check

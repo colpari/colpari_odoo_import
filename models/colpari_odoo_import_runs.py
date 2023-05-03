@@ -107,7 +107,7 @@ class ImportContext():
 			if handler.hasContent():
 				self.log('2_info', handler.status(), modelName=handler.modelName)
 
-	def doMatching(self):
+	def run(self):
 
 		dependencyIdsToResolve = {
 			# handler : set(ids)
@@ -120,7 +120,8 @@ class ImportContext():
 			if handler.importStrategy != 'import':
 				continue
 
-			ids = handler.fetchRemoteKeys(ids = None) #TODO: add remote consideration domain
+ 			#TODO: add remote consideration domain
+			ids = handler.fetchRemoteKeys(ids = None)
 
 			handler.readIncremental(ids, dependencyIdsToResolve)
 
@@ -248,9 +249,6 @@ class colpariOdooImportRun(models.Model):
 		default='configure'
 	)
 
-	progress1 = fields.Integer()
-	progress2 = fields.Integer()
-
 	messages = fields.One2many('colpari.odoo_import_run_message', 'import_run', readonly=True)
 
 	def _log(self, level, text, modelName=False, fieldName=False, dependencyType=False):
@@ -274,21 +272,26 @@ class colpariOdooImportRun(models.Model):
 
 		return result
 
-	def prepare(self):
+	def testRun(self):
+		self._run(doNotWrite = True)
+
+	def realRun(self):
+		self._run(doNotWrite = False)
+
+	def _run(self, doNotWrite):
 		self.ensure_one()
-		self.progress1 = 0
-		self.progress2 = 0
 		self.messages.unlink()
-		self.progress2 = 5
 
 		try:
 			theImport = ImportContext(self)
-			theImport.doMatching()
-			_logger.info("\n\n============= SUCCESSSSSSS =============\n\n")
-			# savedMessages = self._copyMessages()
-			# self.env.cr.rollback()
-			# self.messages.unlink()
-			# self.messages.create(savedMessages)
+			theImport.run()
+			if doNotWrite:
+				savedMessages = self._copyMessages()
+				self.env.cr.rollback()
+				self.messages.unlink()
+				self.messages.create(savedMessages)
+			self.state = 'finished'
+			self._log("2_info","============= SUCCESS (changes saved = {}) =============".format(not doNotWrite))
 
 		except ImportException as ie:
 			txt = traceback.format_exc()

@@ -34,6 +34,9 @@ class colpariOdooImport(models.Model):
 
 	only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=True)
 
+	#TODO: (Muk) is there any built in method to validate the syntax of a domains?
+	global_remote_domain = fields.Text(string="Global remote search domain for all types")
+
 	#TODO: implement options for only importing unarchived records globally and per model
 
 	def getModelConfig(self, modelName):
@@ -77,28 +80,29 @@ class colpariOdooImportModelConfig(models.Model):
 
 	import_model = fields.Many2one('ir.model', required=True, ondelete='cascade')
 
-	import_model_name = fields.Char(related='import_model.model')
+	import_model_name = fields.Char(related='import_model.model', store=True)
 
-	do_create = fields.Boolean(string="Create objects if not found locally", default=True)
-	do_update = fields.Boolean(string="Update objects if found locally", default=True)
+	do_create = fields.Boolean(string="Create new", default=True)
+	do_update = fields.Boolean(string="Update existing", default=True)
 
 	only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=False)
 
-	#TODO: add remote consideration domain
-
 	model_import_strategy = fields.Selection([
-		('import'		, 'Create or update records'),
-		('dependency'	, 'As bulk dependency data'),
-		('match'		, 'Do not import but explicitly configure matching'),
-		('ignore'		, 'Ignore (do not import or match)'),
+		('import'		, 'Create/update'),
+		('dependency'	, 'Bulk dependency'),
+		('match'		, 'Match'),
+		('ignore'		, 'Ignore'),
 	], default='import', required=True)
 
 	matching_strategy = fields.Selection([
-		('odooName'		, 'Match by odoo name'),
-		('explicitKeys'	, 'Match by configured key fields'),
+		('odooName'		, 'by name'),
+		('explicitKeys'	, 'by custom key'),
 	], default='odooName', required=True)
 
 	field_configs = fields.One2many('colpari.odoo_import_fieldconfig', 'model_config')
+
+	#TODO: (Muk) is there any built in method to validate the syntax of a domains?
+	model_remote_domain = fields.Text(string="Remote search domain for this type", help="This is ANDed with the global remote search domain")
 
 	def getFieldConfig(self, fieldName):
 		self.ensure_one()

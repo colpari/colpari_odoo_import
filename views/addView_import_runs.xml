@@ -39,7 +39,7 @@
             attrs="{'invisible': ['|', ('dependency_type', '==', False), ('field_name', '!=', False)]}"
           />
           <button
-            name="actionIgnoreRelatedType" type="object" string="Ignore type"
+            name="actionIgnoreRelatedType" type="object" string="Ignore related type"
             attrs="{'invisible': [('dependency_type', '==', False)]}"
           />
           <field name="field_name" invisible="1" />
@@ -56,12 +56,13 @@
       <field name="arch" type="xml">
         <form>
           <!-- <sheet> -->
+          <header>
+              <button name="testRun" string="Dry run" type="object" class="oe_highlight" />
+              <button name="realRun" string="Run" type="object" class="oe_highlight" />            
+          </header>
             <group>
               <field name="import_config"/>
               <field name="state"/>
-              <button name="prepare" string="Prepare" type="object" class="oe_highlight" />
-              <field name="progress1" widget="progressbar" />
-              <field name="progress2" widget="progressbar" />
             </group>
             <field name="messages"/>
           <!-- </sheet> -->

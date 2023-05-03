@@ -29,6 +29,7 @@
               <field name="name"/>
               <field name="import_source"/>
               <field name="only_required_dependencies"/>
+              <field name="global_remote_domain" />
             </group>
             <h5>Models without configuration are treated as import_strategy = match, matching_strategy = odooName</h5>
             <field name="model_configs">
@@ -63,6 +64,8 @@
               <field name="only_required_dependencies"/>
               <field name="do_update"/>
               <field name="do_create"/>
+              <div>['&amp;', ['field', '=', python_value], ['active', '=', python_value]]</div>
+              <field name="model_remote_domain"/>
             </group>
               <field name="field_configs">
                 <tree>
