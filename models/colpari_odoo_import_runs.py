@@ -42,13 +42,13 @@ class OdooConnection():
 			self._fieldInfo[modelName] = self.modelCall(modelName, 'fields_get')
 		return self._fieldInfo[modelName]
 
-	def readData(self, modelName, fieldsToRead, _logFn, ids = None):
+	def readData(self, modelName, fieldsToRead, searchDomain, _logFn, ids = None):
 		''' read all objects or specific ids of a type '''
 		specificIds = ids != None
 		result = (
 			self.modelCall(modelName, 'read', list(ids), fields = list(fieldsToRead))
 				if ids != None else
-			self.modelCall(modelName, 'search_read', [], fields = list(fieldsToRead))
+			self.modelCall(modelName, 'search_read', searchDomain, fields = list(fieldsToRead))
 		)
 		# #_logFn('3_debug',
 		# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
@@ -81,6 +81,8 @@ class ImportContext():
 		# run checkConfig (NOTE: required, finishes handler setup and may create more handlers)
 		for handler in list(self._handlers.values()):
 			handler.checkConfig()
+
+		_logger.info("global time filter domain is: {}".format(self.importConfig.getTimeFilterDomain()))
 
 	def getHandler(self, modelName):
 		h = self._handlers.get(modelName)
@@ -123,7 +125,8 @@ class ImportContext():
  			#TODO: add remote consideration domain
 			ids = handler.fetchRemoteKeys(ids = None)
 
-			handler.readIncremental(ids, dependencyIdsToResolve)
+			if ids:
+				handler.readIncremental(ids, dependencyIdsToResolve)
 
 		i = 0
 		# read all dependency objects and maybe collect new dependencies. loop until no dependencies left
@@ -158,6 +161,7 @@ class ImportContext():
 					dataToProcess = (handler.toCreate if IS_CREATE else handler.toUpdate)
 					if not dataToProcess:
 						# nothing to do (anymore) for this type
+						handlersSucceeded += 1
 						continue
 					processedCount = handler.tryCreate() if IS_CREATE else handler.tryUpdate()
 					if processedCount:

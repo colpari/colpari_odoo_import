@@ -58,7 +58,7 @@
           <!-- <sheet> -->
           <header>
               <button name="testRun" string="Dry run" type="object" class="oe_highlight" />
-              <button name="realRun" string="Run" type="object" class="oe_highlight" />            
+              <button name="realRun" string="Run" type="object" class="oe_highlight" />
           </header>
             <group>
               <field name="import_config"/>

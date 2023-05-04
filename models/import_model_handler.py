@@ -20,11 +20,26 @@ LOCAL_SCHEMA_OVERRIDE = {
 	'account.move.line' : {
 		'account_id' : { 'required' : True } # required for create
 	},
+	# normally product.template manages/creates the product.product instances during create()
+	# we make both sides non-required to be able to connect them after create()
 	'product.template' : {
-		# this is a real circle. since product.template manages the product.product instances we make them non-required and ignore them
 		'product_variant_ids' : { 'required' : False }
+	},
+	'product.product' : {
+		'product_variant_id' :  { 'required' : False },
+		'product_variant_ids':  { 'required' : False }
 	}
 }
+
+CREATE_CONTEXTS = {
+	'product.template' : {
+		'create_product_product' : True # inhibit auto-creating product.product from product.template
+	}
+}
+
+# (m1, m2, m3, m4, m5) = env['account.move'].browse([3036, 2731, 2451, 2189, 1995])
+# for f in sorted(m1.fields_get().keys()):
+#   print("{} | {} | {} | {} | {} | {}".format(f, m1[f], m2[f], m3[f], m4[f], m5[f]))
 
 class ImportException(Exception):
 	def __init__(self, message, **kwargs):
@@ -187,7 +202,7 @@ class ImportModelHandler():
 					handler = self.shouldFollowDependency(fn)
 					if not handler:
 						continue
-					elif not handler.modelConfig and handler not in followedNotified:
+					elif handler not in followedNotified: # and not handler.modelConfig
 						# log message if relatedTypeName is not configured (we implicitly follow it) once
 						self.log(
 							'2_info', "following dependency {}::{} -> {}".format(self.modelName, fn, relatedTypeName),
@@ -283,6 +298,7 @@ class ImportModelHandler():
 		fieldsToImport = self.getFieldsToImport()
 
 		# check if we should be able to provide all locally required fields
+		#TODO?: warn if there are explicit key fields which are not to be imported (done in _getRemoteIdFields() currently)
 		for fieldName, field in localFields.items():
 			required = field.get('required')
 			relatedTypeName = field.get('relation')
@@ -292,6 +308,7 @@ class ImportModelHandler():
 				# NOTE: this mutates self.fieldsToImport
 				# 	thus, this method is part of the is-proper-set-up path for this class
 				# 	and must be called right after all ImportModelHandler instances are created
+				# FIXME:? this cannot be done in __init__ since self.CTX.getHandler(relatedTypeName) might call __init__ for other models and loops may occur
 				fieldsToImport.pop(fieldName, 0)
 
 			if required:
@@ -316,9 +333,9 @@ class ImportModelHandler():
 				"Empty import field list for {}".format(self.modelName), modelName=self.modelName
 			)
 
-		unimportedFields = set(localFields.keys()) - fieldsToImport.keys()
-		if unimportedFields:
-			self.log('3_debug', "unimported fields : {}".format(unimportedFields), modelName=self.modelName)
+		# unimportedFields = set(localFields.keys()) - fieldsToImport.keys()
+		# if unimportedFields:
+		# 	self.log('3_debug', "unimported fields : {}".format(unimportedFields), modelName=self.modelName)
 
 		return True
 
@@ -637,7 +654,9 @@ class ImportModelHandler():
 					updatesScheduled+=1
 
 		try:
-			createResult = self.env[self.modelName].create(recordsToCreate)
+			createResult = self.env[self.modelName].with_context(
+				**CREATE_CONTEXTS.get(self.modelName, {})
+			).create(recordsToCreate)
 		except Exception as e:
 			_logger.info("create FAILED:\n{}".format(recordsToCreate[:300]))
 			raise e
@@ -773,7 +792,7 @@ class ImportModelHandler():
 
 	def __nameSearch(self, keyName, value, raiseOnMultiple):
 		if not value:
-			# do not search for empty names			
+			# do not search for empty names
 			self.log("1_warning", "{} empty remote key value for field '{}'".format(
 				self.modelName, keyName), modelName = self.modelName
 			)
@@ -808,8 +827,8 @@ class ImportModelHandler():
 
 		relationKeyFieldsHandlers = {} # for fast access to handlers of id fields which are relations
 		for idFieldName in self._getRemoteIdFields():
-			relatedType = self.getLocalFields()[idFieldName].get('relation')
-			if relatedType:
+			relatedTypeName = self.getLocalFields()[idFieldName].get('relation')
+			if relatedTypeName:
 				relationKeyFieldsHandlers[idFieldName] = self.CTX.getHandler(relatedTypeName)
 
 		for remoteId in ids:
@@ -820,7 +839,7 @@ class ImportModelHandler():
 
 			if self.importStrategy == 'dependency':
 				# dependency data is not resolved but is created elsewhere
-				# TODO: this could be optimized out of the per-id loop 
+				# TODO: this could be optimized out of the per-id loop
 				unresolvedIds.add(remoteId)
 				continue
 
@@ -834,8 +853,8 @@ class ImportModelHandler():
 					localEntry = self.__nameSearch('name', remoteKeys['name'], raiseOnMultiple = True)
 
 				if localEntry:
-					self.idMap[remoteId] = localEntry[0]
-					#_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry))
+					self.idMap[remoteId] = localEntry[0][0]
+					#_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry[0]))
 					resolvedIds.add(remoteId)
 				else:
 					unresolvedIds.add(remoteId)
@@ -848,15 +867,15 @@ class ImportModelHandler():
 					# copy the keys and try to map their relation id values
 					remoteKeys = dict(remoteKeys)
 					for fieldName, handler in relationKeyFieldsHandlers.items():
-						mappedId = handler.idMap.get(remoteKeys[fieldName])
+						mappedId = handler.idMap.get(remoteKeys[fieldName]) #FIXME: if a *2many field gets configured as key field this whill blow up -> forbid in checkConfig()
 						if mappedId:
 							remoteKeys[fieldName] = mappedId
 						else:
 							# the remote relation key is not resolveable (yet) so this object is unresolved too
 							cannotResolveRemoteRelationKey = True
-							_logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
-								self.modelName, remoteKeys, remoteId, handler
-							))
+							# _logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
+							# 	self.modelName, remoteKeys, remoteId, handler
+							# ))
 							break
 
 				if cannotResolveRemoteRelationKey:
@@ -889,9 +908,10 @@ class ImportModelHandler():
 
 		#self.log('3_debug',
 		#_logger.info("{} resolve +{} -{}".format(self.modelName, len(resolvedIds), len(unresolvedIds)))#, modelName=self.modelName)
-		if ids ^ resolvedIds ^ unresolvedIds: # sanity check
-			raise Exception("Calculated id sets do not add up to the given id set:\ninput     : {}\nresolved  : {}\nunresolved:{}".format(
-				ids, resolvedIds, unresolvedIds
+		if ids ^ resolvedIds ^ unresolvedIds ^pendingIds: # sanity check
+			raise Exception(
+				"Calculated id sets do not add up to the given id set:\ninput      : {}\nresolved   : {}\nunresolved :{}\npending    :{}".format(
+					ids, resolvedIds, unresolvedIds, pendingIds
 			))
 		return (resolvedIds, unresolvedIds, pendingIds)
 
@@ -922,10 +942,12 @@ class ImportModelHandler():
 				return ids or set(self.keyMaterial.keys())
 
 		idFieldNames = self._getRemoteIdFields()
-		#TODO: add remote consideration domain
-		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.log, ids = ids2Fetch)
+		idFieldsWhichAreKeys = { fn for fn in idFieldNames if self.getLocalFields()[fn].get('relation') }
 
-		_logger.info("fetchRemoteKeys({}) : read idFields {} of {} remote records (from {} ids)".format(
+		#TODO: add remote consideration domain
+		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.importConfig.getTimeFilterDomain(), self.log, ids = ids2Fetch)
+
+		_logger.info("{} : read idFields {} of {} remote records (from {} ids)".format(
 			self.modelName, idFieldNames, len(records), len(ids2Fetch or []))
 		)
 
@@ -936,23 +958,29 @@ class ImportModelHandler():
 
 		failOnRecordsWithAmbigousRemoteKeys = []
 		for record in records:
-			remoteId = record['id']
-
 			# build index
+			remoteId = record.pop('id')
 			self.keyMaterial[remoteId] = record
-			del record['id']
 
-			# check uniqueness. create key values path in remote self.remoteKeyUniquenessCheck
+			# check uniqueness. create path of key values in remote self.remoteKeyUniquenessCheck and see if there is more than one object at the end of it
 			#TODO: also check for empty key field values?
-			node = self.remoteKeyUniquenessCheck
+			#NOTE: the order in idFieldNames hast to be stable during the runtime of one import, otherwise this breaks
+			node = self.remoteKeyUniquenessCheck # key path start
 			for fn in idFieldNames:
+				# # take id from [id, 'name'] returned for many2one-fields
+				if fn in idFieldsWhichAreKeys:
+					record[fn] = record[fn][0]
+				# if not record[fn]:
+				# 	_logger.warning("{} key field '{}' for remote id {} is False in {}".format(self.modelName, fn, remoteId, record))
+				# walk/pave key path
 				node = node.setdefault(record[fn], {})
+			# insert record at end of key path
 			node[remoteId] = record
 			if len(node) > 1:
-				# remote key was seen before
+				# key path was taken before
 				failOnRecordsWithAmbigousRemoteKeys.append((node.keys(), record))
 				if len(failOnRecordsWithAmbigousRemoteKeys) > 30:
-					break # enough for logging 
+					break # enough for logging
 				else:
 					continue
 
@@ -986,7 +1014,7 @@ class ImportModelHandler():
 		if idsNotPresent:
 			# read data for idsNotPresent into cache
 			fieldNamesToImport = self.getFieldsToImport().keys()
-			records = self.remoteOdoo.readData(self.modelName, fieldNamesToImport, self.log, ids = idsNotPresent)
+			records = self.remoteOdoo.readData(self.modelName, fieldNamesToImport, None, self.log, ids = idsNotPresent)
 
 			_logger.info("{} : read {} of {}/{} remote records with {} fields".format(
 				self.modelName, len(records), len(idsNotPresent), len(ids), len(fieldNamesToImport)
