@@ -50,11 +50,11 @@ class OdooConnection():
 				if ids != None else
 			self.modelCall(modelName, 'search_read', [], fields = list(fieldsToRead))
 		)
-		#_logFn('3_debug',
-		_logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
-				len(result), modelName, len(ids or []), len(fieldsToRead)
-			)#, modelName=modelName
-		)
+		# #_logFn('3_debug',
+		# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
+		# 		len(result), modelName, len(ids or []), len(fieldsToRead)
+		# 	)#, modelName=modelName
+		# )
 		return result
 
 class ImportContext():

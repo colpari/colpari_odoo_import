@@ -774,10 +774,10 @@ class ImportModelHandler():
 	def __nameSearch(self, keyName, value, raiseOnMultiple):
 		if not value:
 			# do not search for empty names			
-			#return None
-			raise ImportException("{} empty key value for field '{}".format(
+			self.log("1_warning", "{} empty remote key value for field '{}'".format(
 				self.modelName, keyName), modelName = self.modelName
 			)
+			return None
 
 		localEntry = self.env[self.modelName].name_search(value, operator = '=')
 		# if localEntry:
@@ -829,7 +829,8 @@ class ImportModelHandler():
 			if self.matchingStrategy == 'odooName':
 				localEntry = self.__nameSearch('display_name', remoteKeys['display_name'], raiseOnMultiple = False)
 
-				if (len(localEntry) != 1) and 'name' in remoteKeys:
+				# if we didn't find an exact hit for display_name try name if it exists
+				if 'name' in remoteKeys and (not localEntry or (len(localEntry) > 1)):
 					localEntry = self.__nameSearch('name', remoteKeys['name'], raiseOnMultiple = True)
 
 				if localEntry:
@@ -924,15 +925,16 @@ class ImportModelHandler():
 		#TODO: add remote consideration domain
 		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.log, ids = ids2Fetch)
 
-		# _logger.info("fetchRemoteKeys() : read idFields of {} remote records (from {} ids) of type {}".format(
-		# 	len(records), len(ids2Fetch or []), self.modelName)
-		# )
+		_logger.info("fetchRemoteKeys({}) : read idFields {} of {} remote records (from {} ids)".format(
+			self.modelName, idFieldNames, len(records), len(ids2Fetch or []))
+		)
 
 		if ids2Fetch and (len(ids2Fetch) != len(records)):
-			raise Exception("Short read of {} items while trying to get remote names of {} models of type {}".format(
-				len(records), len(ids), self.modelName)
+			raise Exception("{} : short read of {} items while trying to get remote names of {} ids".format(
+				self.modelName, len(records), len(ids))
 			)
 
+		failOnRecordsWithAmbigousRemoteKeys = []
 		for record in records:
 			remoteId = record['id']
 
@@ -945,20 +947,28 @@ class ImportModelHandler():
 			node = self.remoteKeyUniquenessCheck
 			for fn in idFieldNames:
 				node = node.setdefault(record[fn], {})
-			node[remoteId] = 1
+			node[remoteId] = record
 			if len(node) > 1:
-				raise ImportException("{} : multiple remote object ids {} have the same set of keys ({})".format(
-					self.modelName, list(node.keys()), record
-				), modelName = self.modelName)
+				# remote key was seen before
+				failOnRecordsWithAmbigousRemoteKeys.append((node.keys(), record))
+				if len(failOnRecordsWithAmbigousRemoteKeys) > 30:
+					break # enough for logging 
+				else:
+					continue
 
-			# NOTE: sanity check of field names in record...
+			#NOTE: sanity check of field names in record...
 			if idFieldNames ^ record.keys():
 				# ... since it is data recieved from another process
 				# ... and shall be passed directly into odoo search domains later on
 				raise Exception(
-					"Key info for {}::{} has non-matching fields. Expected {}".format(
+					"Key info for {}::{} has non-requested fields (expected: {})".format(
 						self.modelName, record, idFieldNames
 				))
+
+		if failOnRecordsWithAmbigousRemoteKeys:
+			raise ImportException("{} : multiple remote object ids --> key combinations:\n{}".format(
+				self.modelName, "\n".join(map(lambda x: "{} --> {}".format(list(x[0]), x[1]), failOnRecordsWithAmbigousRemoteKeys))
+			), modelName = self.modelName)
 
 		return ids or set(self.keyMaterial.keys())
 

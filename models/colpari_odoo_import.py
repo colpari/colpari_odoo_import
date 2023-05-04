@@ -37,7 +37,16 @@ class colpariOdooImport(models.Model):
 	#TODO: (Muk) is there any built in method to validate the syntax of a domains?
 	global_remote_domain = fields.Text(string="Global remote search domain for all types")
 
-	#TODO: implement options for only importing unarchived records globally and per model
+	#TODO: customizeable standard domains
+	# date:
+	#	create/write/none
+	#			- before/after
+	#			- fix date
+	#			- relative date (to invoction)
+	#			- date of last import/data
+	#				-> start of last run/greatest update of last run?
+	# archived:
+	#	yes/no/both
 
 	def getModelConfig(self, modelName):
 		self.ensure_one()
