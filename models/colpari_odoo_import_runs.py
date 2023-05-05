@@ -110,6 +110,26 @@ class ImportContext():
 			if handler.hasContent():
 				self.log('2_info', handler.status(), modelName=handler.modelName)
 
+	def run2(self, onlyReadPhase):
+		'''
+			Tree shaking:
+				- once: main types id-less read of keys
+					- resolve -> (r,u,p)
+					- (r?,u?) -> read data and schedule -> (2c, 2u, p)
+					- collect dependencies for (2c, 2u, p) unless target type has 'bulk'
+
+				- while dependencies and not numb
+					- read dep keys 
+					- resolve dep keys and p -> (r,u,p)
+					- if strategy == import 
+						- (r?,u?) -> read data and schedule -> (2c, 2u, p)
+
+				- p=0
+				- (2c, 2u) -> read related "bulk" types -> 2c
+
+		'''
+		pass
+
 	def run(self, onlyReadPhase):
 
 		configuredHandlers = list(self.getConfiguredHandlers())

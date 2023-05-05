@@ -153,7 +153,7 @@ class colpariOdooImportModelConfig(models.Model):
 
     model_import_strategy = fields.Selection([
         ('import'       , 'Create/update'),
-        ('dependency'   , 'Bulk dependency'),
+        ('dependency'   , 'Bulk dependency'), # FIXME: rename to 'bulk'
         ('match'        , 'Match'),
         ('ignore'       , 'Ignore'),
     ], default='import', required=True)
