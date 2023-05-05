@@ -106,30 +106,37 @@ class ImportContext():
 
 		#for handler in self.getConfiguredHandlers():
 		for handler in self._handlers.values():
+			handler.updateResolvingStatus()
 			if handler.hasContent():
 				self.log('2_info', handler.status(), modelName=handler.modelName)
 
-	def run(self):
+	def run(self, onlyReadPhase):
 
+		configuredHandlers = list(self.getConfiguredHandlers())
+
+		# first pass. fetch keys of everything that needs to be resolved
+		initialIds = {
+			# handler : set(ids)
+		}
+		for handler in configuredHandlers:
+			if handler.hasImportStrategy('import', 'match'):
+				initialIds[handler] = handler.fetchRemoteKeys(ids = None)
+
+		_logger.info("keys fetched")
+
+		# second pass. fetch all import types and collect dependencies
 		dependencyIdsToResolve = {
 			# handler : set(ids)
 		}
 
-		configuredHandlers = list(self.getConfiguredHandlers())
-
-		# first pass. fetch all import types and collect dependencies
-		for handler in configuredHandlers:
-			if handler.importStrategy != 'import':
-				continue
-
- 			#TODO: add remote consideration domain
-			ids = handler.fetchRemoteKeys(ids = None)
-
-			if ids:
+		for handler, ids in initialIds.items():
+			if ids and handler.hasImportStrategy('import'):
 				handler.readIncremental(ids, dependencyIdsToResolve)
 
+		_logger.info("top level types read")
+
 		i = 0
-		# read all dependency objects and maybe collect new dependencies. loop until no dependencies left
+		# read all dependency objects and maybe collect their dependencies. loop until no new dependencies are discovered
 		while dependencyIdsToResolve:
 			i+=1
 			thisPass = dependencyIdsToResolve
@@ -148,6 +155,9 @@ class ImportContext():
 		#TODO: provide todo-info logged by below line more prominent(ly?) in UI
 		self.__logHandlerStatus()
 
+		if onlyReadPhase:
+			return False
+
 		for IS_CREATE in (True, False): # first process objects to create, then update
 			phaseName = 'create' if IS_CREATE else 'update'
 			finished = False
@@ -165,7 +175,7 @@ class ImportContext():
 						continue
 					processedCount = handler.tryCreate() if IS_CREATE else handler.tryUpdate()
 					if processedCount:
-						# we created the objects of this type. progess! :)
+						# we created/updates some objects of this type. progess! :)
 						handlersSucceeded += 1
 					if processedCount < len(dataToProcess):
 						# but not all objects (yet)
@@ -187,12 +197,20 @@ class colpariOdooImportRunMessage(models.Model):
 	_rec_name = 'text'
 
 	import_run = fields.Many2one('colpari.odoo_import_run', required=True, ondelete='cascade')
-	level = fields.Selection([('0_error', 'Error'), ('1_warning', 'Warning'), ('2_info', 'Info'),('3_debug', 'Debug')], required=True)
+	level = fields.Selection(
+		[('0_error', 'Error'), ('1_warning', 'Warning'), ('2_info', 'Info'),('3_debug', 'Debug')],
+		required=True
+	)
 	text = fields.Char()
 
 	model_name = fields.Char()
 	field_name = fields.Char()
 	dependency_type = fields.Char()
+
+	count_in_scope = fields.Integer()
+	count_resolved = fields.Integer()
+	count_2create = fields.Integer()
+	count_2update = fields.Integer()
 
 	def actionIgnoreRelatedType(self):
 		self.ensure_one()
@@ -255,12 +273,26 @@ class colpariOdooImportRun(models.Model):
 
 	messages = fields.One2many('colpari.odoo_import_run_message', 'import_run', readonly=True)
 
-	def _log(self, level, text, modelName=False, fieldName=False, dependencyType=False):
+	messages_debug = fields.One2many('colpari.odoo_import_run_message', 'import_run',  compute="_computeMessages")
+
+	messages_non_debug = fields.One2many('colpari.odoo_import_run_message', 'import_run',  compute="_computeMessages")
+
+	@api.depends('messages')
+	def _computeMessages(self):
+		for record in self:
+			for m in record.messages:
+				if m.level == '3_debug':
+					record.messages_debug += m
+				else:
+					record.messages_non_debug += m
+
+	def _log(self, level, text, modelName=False, fieldName=False, dependencyType=False, countInScope = False, cr = False):
 		self.ensure_one()
 		_logger.log(_logLevelMap[level], text)
 		self.messages.create([{
 			'level' : level, 'text' : text, 'import_run' : self.id,
-			'model_name' : modelName, 'field_name' : fieldName, 'dependency_type' : dependencyType
+			'model_name' : modelName, 'field_name' : fieldName, 'dependency_type' : dependencyType,
+
 		}])
 
 	def _copyMessages(self):
@@ -276,20 +308,23 @@ class colpariOdooImportRun(models.Model):
 
 		return result
 
+	def prepareRun(self):
+		self._run(doNotWrite = True, onlyReadPhase = True)
+
 	def testRun(self):
-		self._run(doNotWrite = True)
+		self._run(doNotWrite = True, onlyReadPhase = False)
 
 	def realRun(self):
-		self._run(doNotWrite = False)
+		self._run(doNotWrite = False, onlyReadPhase = False)
 
-	def _run(self, doNotWrite):
+	def _run(self, doNotWrite, onlyReadPhase):
 		self.ensure_one()
 		self.messages.unlink()
 
 		try:
 			theImport = ImportContext(self)
-			theImport.run()
-			if doNotWrite:
+			theImport.run(onlyReadPhase)
+			if doNotWrite and not onlyReadPhase:
 				savedMessages = self._copyMessages()
 				self.env.cr.rollback()
 				self.messages.unlink()

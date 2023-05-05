@@ -57,14 +57,25 @@
         <form>
           <!-- <sheet> -->
           <header>
+              <button name="prepareRun" string="Check" type="object" class="oe_highlight" />
               <button name="testRun" string="Dry run" type="object" class="oe_highlight" />
               <button name="realRun" string="Run" type="object" class="oe_highlight" />
           </header>
-            <group>
-              <field name="import_config"/>
-              <field name="state"/>
-            </group>
-            <field name="messages"/>
+          <group>
+            <field name="import_config"/>
+            <field name="state"/>
+          </group>
+          <notebook>
+            <!-- <page string="All Messages" >
+              <field name="messages"/>
+            </page> -->
+            <page string="Messages">
+              <field name="messages_non_debug"/>
+            </page>
+            <page string="Debug Messages">
+              <field name="messages_debug"/>
+            </page>
+          </notebook>
           <!-- </sheet> -->
         </form>
       </field>

@@ -24,22 +24,27 @@
       <field name="groups_id" eval="[(4, ref('group_colpari_odoo_import_user'))]"/>
       <field name="arch" type="xml">
         <form>
-          <sheet>
-            <group>
-              <field name="name"/>
-              <field name="import_source"/>
-              <field name="only_required_dependencies"/>
-              <field name="global_remote_domain" />
-
-              <field name="time_filter_timestamp" />
-              <field name="time_filter_direction" />
-              <field name="time_filter_or_at" />
-              <field name="time_filter_type" />
-              <field name="time_filter_ago_unit" />
-              <field name="time_filter_ago_amount" />
-              <field name="time_filter_fix" />
-
+          <!-- <sheet> -->
+            <group col="2">
+              <group>
+                <field name="name"/>
+                <field name="import_source"/>
+                <field name="only_required_dependencies"/>
+                <field name="global_remote_domain" />
+              </group>
+              <group>
+                <field name="time_filter_timestamp" />
+                <group col="2">
+                  <field name="time_filter_direction" />
+                  <field name="time_filter_or_at" />
+                </group>
+                <field name="time_filter_type" />
+                <field name="time_filter_ago_unit" />
+                <field name="time_filter_ago_amount" />
+                <field name="time_filter_fix" />
+              </group>
             </group>
+            <separator/>
             <h5>Models without configuration are treated as import_strategy = match, matching_strategy = odooName</h5>
             <field name="model_configs">
               <tree>
@@ -52,7 +57,7 @@
                 <field name="only_required_dependencies"/>
               </tree>
             </field>
-          </sheet>
+          <!-- </sheet> -->
         </form>
       </field>
     </record>
@@ -76,7 +81,7 @@
               <div>['&amp;', ['field', '=', python_value], ['active', '=', python_value]]</div>
               <field name="model_remote_domain"/>
             </group>
-              <field name="field_configs">
+              <field name="field_configs" edit="true">
                 <tree>
                   <field name="name"/>
                   <field name="field_import_strategy"/>

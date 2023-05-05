@@ -100,13 +100,6 @@ class colpariOdooImport(models.Model):
         return [(self.time_filter_timestamp, operator, fields.Datetime.to_string(theDate))]
 
     #TODO: customizeable standard domains
-    # date:
-    #   create/write/none
-    #           - before/after
-    #           - fix date
-    #           - relative date (to invoction)
-    #           - date of last import/data
-    #               -> start of last run/greatest update of last run?
     # archived:
     #   yes/no/both
 
