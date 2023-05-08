@@ -56,6 +56,8 @@ class ImportModelHandler():
 		self.importConfig 	= parentContext.importConfig
 		self.remoteOdoo		= parentContext.remoteOdoo
 
+		self.__sharedDependencyWorkList = parentContext._sharedDependencyWorkList
+
 		self.modelConfig 	= self.importConfig.getModelConfig(modelName)
 		self.fieldConfigs	= {}
 
@@ -77,9 +79,9 @@ class ImportModelHandler():
 
 		self._fieldProperties	= { # lazy index of local field properties by propertyName
 			# propertyName : {
-			# 	'names'		: set(),
-			# 	'dicts'		: { fieldName : fieldDef },
-			# 	'values' 	: { fieldName : propertyValue }
+			# 	'names'		: set(), # all field names where propertyName is True
+			# 	'dicts'		: { fieldName : fieldDef }, # all field definitions where propertyName is True
+			# 	'values' 	: { fieldName : propertyValue } # property values of all fields where propertyName is True
 			# }
 		}
 
@@ -92,6 +94,7 @@ class ImportModelHandler():
 		self.idMap			= {} 	# { remoteId : localId }
 		self.toCreate		= {} 	# { remoteId : { k :v, k :v... } }
 		self.toUpdate		= {} 	# { remoteId : { k :v, k :v... } }
+		self.pending		= {} 	# { remoteId : { k :v, k :v... } }
 
 		# keeps track of all remote key combinations to assure they are unique in the first place
 		self.remoteKeyUniquenessCheck = {} # {  kv1 : { kv2 : { k3v .. : set(remoteId) }}}
@@ -303,6 +306,7 @@ class ImportModelHandler():
 			required = field.get('required')
 			relatedTypeName = field.get('relation')
 			ignored = self.getFieldImportStrategy(fieldName) == 'ignore'
+			isPartOfKey = self.getFieldImportStrategy(fieldName) == 'key'
 			#_logger.info("checking field {} on {}; req={}, rel={}, ign={}".format(fieldName, self.modelName, required, relatedTypeName, ignored))
 			if ignored:
 				# NOTE: this mutates self.fieldsToImport
@@ -326,6 +330,11 @@ class ImportModelHandler():
 				if relatedTypeName and self.CTX.getHandler(relatedTypeName).importStrategy == 'ignore':
 					raise ImportException("Field {}.{} is required but it contains type {} which is explicitly ignored in import configuration".format(
 						self.modelName, fieldName, relatedTypeName
+					))
+
+			if isPartOfKey and relatedTypeName and field["type"] != 'many2one':
+				 	raise ImportException("Field X2many field {}.{} is not supported as key field: {}".format(
+						self.modelName, fieldName, field
 					))
 
 		if not fieldsToImport:
@@ -353,8 +362,9 @@ class ImportModelHandler():
 			relatedType = self.shouldFollowDependency(relationFieldName)
 			if not relatedType:
 				raise ValidationError(
-					"This path should not be taken since relFieldsToImport is already filtered by shouldFollowDependency()??"
-				)
+					"Cannot find related type handler for field {}.{}. This should not happen, since relFieldsToImport is already filtered by shouldFollowDependency()??".format(
+					self.modelName, self.getLocalFields().get(relationFieldName) or relationFieldName
+				))
 
 			dependencyIds = set()
 			for remoteId, remoteRecord in records.items():
@@ -502,23 +512,17 @@ class ImportModelHandler():
 	def readIncremental(self, ids, dependencyIdsToResolve):
 		if not ids:
 			raise Exception("Empty id list")
-
-
-		'''
-		TODO:
-			- read data for pending ids but put aside
-
-
+		''' TODO:
 			- ALTERNATIVES:
 				1. apply time filter only to leading objects
 				2. avoid ref-keys
 				3. another strategy for res.partner
 		'''
 
-		if self.importStrategy == 'ignore':
-			raise Exception("Import strategy for {} should not be 'ignore' here".format(self.modelName))
+		if self.importStrategy != 'import':
+			raise Exception("readIncremental({}) : unsupported import strategy: '{}".format(self.modelName, self.importStrategy))
 
-		elif self.importStrategy == 'import':
+		if self.importStrategy == 'import':
 			self.fetchRemoteKeys(ids)
 			(resolvedIds, unresolvedIds, pendingIds) = self.resolve(ids)
 
@@ -832,36 +836,93 @@ class ImportModelHandler():
 
 		return localEntry
 
-	def resolve(self, ids):
+	def resolveReadAndSchedule(self, dependencyIdsToResolve):
 		''' splits the provided id set in 3 distincs sets:
 				1. ids we know the local id for
 				2. ids not mappable to a local id
 				3. ids we don't yet know if they belong into set 1 or set 2
+
+				keyMaterial  -> resolve
 		'''
+		(resolvedIds, unresolvedIds, pendingIds) = self.__resolve() # raises if strategy != import or match
+
+		# importStrategy is match and all are matched -> done
+		# OR
+		# importStrategy is import and we need to schedule:
+
+		if self.importStrategy == 'import':
+			idsToImport = set()
+
+			if self.modelConfig.do_create:
+				idsToImport.update(unresolvedIds)
+
+			if self.modelConfig.do_update:
+				idsToImport.update(resolvedIds)
+
+			_logger.info("{} {} ids to import".format(self.modelName, len(idsToImport)))
+			if idsToImport:
+				# sanity check. none of idsToImport should be on the final worklists yet
+				duplicates = idsToImport & (self.toCreate.keys() | self.toUpdate.keys())
+				if duplicates:
+					raise Exception(
+						"Insonsistent worklist state for {}:\nidsToImport : {}\n2create    : {}\n2update    :{}\npending    :{}\nidMap      :{}".format(
+							self.modelName, idsToImport, self.toCreate.keys(), self.toUpdate.keys(), self.keyMaterial.keys(), self.idMap.keys()
+					))
+
+				# read ids to import and put into toCreate/toUpdate
+				remoteData = self._readRemoteDataAndCollectDepenencies(idsToImport, dependencyIdsToResolve)
+				for remoteId, remoteRecord in remoteData.items():
+					if remoteId in unresolvedIds:
+						self.toCreate[remoteId] = remoteRecord
+					elif remoteId in resolvedIds:
+						self.toUpdate[remoteId] = remoteRecord
+					elif remoteId in self.keyMaterial:
+						pass
+					else: # sanity check. could only hit in case _readRemoteDataAndCollectDepenencies() returns unrequested data
+						raise Exception(
+							"ID {} for {} should be either in resolved, unresolved or pending:\nrequested: {}\nresolved: {}\nunresolved: {}\npending: {}".format(
+								remoteId, self.modelName, idsToImport, resolvedIds, unresolvedIds, pendingIds
+							)
+						)				
+
+	def __resolve(self):
+		''' splits the provided id set in 3 distincs sets:
+				1. ids we know the local id for
+				2. ids not mappable to a local id
+				3. ids we don't yet know if they belong into set 1 or set 2
+
+				keyMaterial  -> resolve
+		'''
+		if not self.hasImportStrategy('match' ,'import'):
+			raise Exception("__resolve({}) : should not be called for import strategy {}".format(
+				self.modelName, self.importStrategy
+		))
+
 		theEnv 			= self.env[self.modelName]
 		resolvedIds 	= set()
 		unresolvedIds 	= set()
 		pendingIds		= set()
 
+		if self.keyMaterial.keys() & (self.toCreate.keys() | self.toUpdate.keys() | self.idMap.keys()):
+			raise Exception(
+				"Insonsistent worklist state for {}:\nkeyMaterial : {}\n2create    : {}\n2update    :{}\nidMap    :{}".format(
+					self.modelName, self.keyMaterial.keys(), self.toCreate.keys(), self.toUpdate.keys(), self.idMap.keys()
+			))
 		relationKeyFieldsHandlers = {} # for fast access to handlers of id fields which are relations
 		for idFieldName in self._getRemoteIdFields():
 			relatedTypeName = self.getLocalFields()[idFieldName].get('relation')
 			if relatedTypeName:
 				relationKeyFieldsHandlers[idFieldName] = self.CTX.getHandler(relatedTypeName)
 
-		for remoteId in ids:
-			if remoteId in self.idMap:
-				# already resolved
-				resolvedIds.add(remoteId)
-				continue
-
-			if self.importStrategy == 'dependency':
-				# dependency data is not resolved but is created elsewhere
-				# TODO: this could be optimized out of the per-id loop
-				unresolvedIds.add(remoteId)
-				continue
-
-			remoteKeys = self.keyMaterial[remoteId]
+		pendingKeys = {}
+		for remoteId, remoteKeys in self.keyMaterial.items():
+			# if remoteId in self.idMap:
+			# 	# already resolved. should not happen
+			# 	_logger.warning("__resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
+			# 		self.modelName, remoteId, self.keyMaterial
+			# ))
+			# 	resolvedIds.add(remoteId)
+			# 	continue
 
 			if self.matchingStrategy == 'odooName':
 				localEntry = self.__nameSearch('display_name', remoteKeys['display_name'], raiseOnMultiple = False)
@@ -883,21 +944,22 @@ class ImportModelHandler():
 				cannotResolveRemoteRelationKey = False
 				if relationKeyFieldsHandlers:
 					# copy the keys and try to map their relation id values
-					remoteKeys = dict(remoteKeys)
+					_originalRemoteKeys = dict(remoteKeys)
 					for fieldName, handler in relationKeyFieldsHandlers.items():
-						mappedId = handler.idMap.get(remoteKeys[fieldName]) #FIXME: if a *2many field gets configured as key field this whill blow up -> forbid in checkConfig()
+						#FIXME: if a *2many field gets configured as key field this whill blow up -> forbid in checkConfig()
+						mappedId = handler.idMap.get(remoteKeys[fieldName])
 						if mappedId:
 							remoteKeys[fieldName] = mappedId
 						else:
 							# the remote relation key is not resolveable (yet) so this object is unresolved too
 							cannotResolveRemoteRelationKey = True
 							_logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
-								self.modelName, remoteKeys, remoteId, handler
+								self.modelName, remoteKeys, remoteId, handler.modelName
 							))
 							break
 
 				if cannotResolveRemoteRelationKey:
-					pendingIds.add(remoteId)
+					pendingKeys[remoteId] = _originalRemoteKeys
 					continue
 
 				# search for key locally
@@ -924,14 +986,30 @@ class ImportModelHandler():
 					self.matchingStrategy, self.modelName)
 				)
 
-		#self.log('3_debug',
-		_logger.info("{} resolve +{} -{} ?{}".format(self.modelName, len(resolvedIds), len(unresolvedIds), len(pendingIds)))#, modelName=self.modelName)
-		if ids ^ resolvedIds ^ unresolvedIds ^pendingIds: # sanity check
+		#/end of per object loop
+
+		# self.log('3_debug',
+		_logger.info("{} resolve +{} -{} ?{}".format(self.modelName, len(resolvedIds), len(unresolvedIds), len(pendingKeys)))
+		if self.keyMaterial.keys() ^ resolvedIds ^ unresolvedIds ^ pendingKeys.keys(): # sanity check
 			raise Exception(
 				"Calculated id sets do not add up to the given id set:\ninput      : {}\nresolved   : {}\nunresolved :{}\npending    :{}".format(
-					ids, resolvedIds, unresolvedIds, pendingIds
+					self.keyMaterial.keys(), resolvedIds, unresolvedIds, pendingKeys.keys()
 			))
-		return (resolvedIds, unresolvedIds, pendingIds)
+		# fail if we have unrealoved keys in strategy 'match'
+		if unresolvedIds and self.importStrategy == 'match':
+			someUnresolvedKeys = map(self.keyMaterial.get, list(unresolvedIds)[:30])
+			raise ImportException(
+				"{} remote records of type {} could not be resolved locally:\n{}".format(
+					len(unresolvedIds), self.modelName,
+					# list the remoteKeys info for at most 30 of the failing ids
+					"\n".join(map(str, someUnresolvedKeys))
+				),
+				# kwargs for log entry
+				modelName = self.modelName, dependencyType = self.modelName
+			)
+		# done
+		self.keyMaterial = pendingKeys
+		return (resolvedIds, unresolvedIds, set(pendingKeys.keys()))
 
 	def fetchRemoteKeys(self, ids): #TODO: add remote consideration domain
 
@@ -952,10 +1030,13 @@ class ImportModelHandler():
 		if self.keyMaterial == None:
 			self.keyMaterial = {}
 
-		ids2Fetch = (ids and set(ids)) or ids #NOTE: ids2Fetch may be None here and stay None in a read-all case
+		ids2Fetch = (ids and set(ids)) or ids
 
-		if ids2Fetch and self.keyMaterial: # specific ids given and we already have key data. fetch incremental
-			ids2Fetch = ids2Fetch - self.keyMaterial.keys() # check which ones we don't have
+		#NOTE: ids2Fetch is either None (-> read all) or non-empty (-> read specific) from here
+
+		if ids2Fetch: # specific ids are given
+			# fetch only what we don't know yet
+			ids2Fetch = ids2Fetch - self.idMap.keys() - self.toCreate.keys() - self.toUpdate.keys()
 			if not ids2Fetch: # all present
 				return ids or set(self.keyMaterial.keys())
 

@@ -63,6 +63,14 @@ class ImportContext():
 		self.importRun 		= importRun
 		self.log 			= importRun._log
 		self.importConfig 	= importRun.import_config
+		
+		self._sharedDependencyWorkList = {
+			# handler : {
+			#	remoteId : {
+			#		relatedType : set(relatedRemoteIds)
+			#	}
+			#}
+		}
 
 		connParams 			= self.importConfig.import_source
 		self.remoteOdoo 	= OdooConnection( # make connection
@@ -84,6 +92,7 @@ class ImportContext():
 
 		_logger.info("global time filter domain is: {}".format(self.importConfig.getTimeFilterDomain()))
 
+
 	def getHandler(self, modelName):
 		h = self._handlers.get(modelName)
 		if not h:
@@ -98,9 +107,13 @@ class ImportContext():
 		]
 		#return self.importConfig.mapped('model_configs.import_model.model')
 
-	def getConfiguredHandlers(self):
+	def getConfiguredHandlers(self, *importStrategies):
 		# return the handlers for all explicitly configured models
-		return map(self.getHandler, self.getConfiguredModelNames())
+		_all = map(self.getHandler, self.getConfiguredModelNames())
+		if importStrategies:
+			return [ handler for handler in _all if handler.hasImportStrategy(*importStrategies) ]
+		else:
+			return _all
 
 	def __logHandlerStatus(self):
 
@@ -113,11 +126,11 @@ class ImportContext():
 	def run2(self, onlyReadPhase):
 		'''
 			Tree shaking:
-				- once: main types id-less read of keys
+				- discover: main import types id-less read of keys
 					- resolve -> (r,u,p)
 					- (r?,u?) -> read data and schedule -> (2c, 2u, p)
-					- collect dependencies for (2c, 2u, p) unless target type has 'bulk'
-
+				
+				- collect dependencies for (2c, 2u) unless target type has 'bulk'
 				- while dependencies and not numb
 					- read dep keys 
 					- resolve dep keys and p -> (r,u,p)
@@ -128,7 +141,44 @@ class ImportContext():
 				- (2c, 2u) -> read related "bulk" types -> 2c
 
 		'''
-		pass
+		configuredHandlers = list(self.getConfiguredHandlers())
+
+		# first pass. fetch keys of import & match types, resolve and schedule 
+		dependencyIdsToResolve = {}
+
+		for handler in self.getConfiguredHandlers('import', 'match'):
+			handler.fetchRemoteKeys(ids = None)
+
+		for handler in self.getConfiguredHandlers('import', 'match'):
+			handler.resolveReadAndSchedule(dependencyIdsToResolve)
+
+		_logger.info("phase 0 complete")
+
+		i = 0
+		# read all dependency objects and maybe collect their dependencies. loop until no new dependencies are discovered
+		while dependencyIdsToResolve:
+			i+=1
+			thisPass = dependencyIdsToResolve
+			dependencyIdsToResolve = {}
+
+			for handler, dependencyIds in thisPass.items():
+				if not dependencyIds: # sanity check
+					raise Exception("Empty dependency list")
+
+				if handler.hasImportStrategy('import', 'match'):
+					handler.fetchRemoteKeys(dependencyIds)
+					handler.resolveReadAndSchedule(dependencyIdsToResolve)
+				elif handler.hasImportStrategy == 'dependency':
+					handler._readRemoteDataAndCollectDepenencies(dependencyIds, dependencyIdsToResolve)
+				else:
+					raise Exception("phase 1 type {} : import strategy {} should not occur here".format(
+						handler, handler.importStrategy
+					))
+
+				_logger.info("{} reading phase pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
+
+		_logger.info("reading phase finished after {} iterations".format(i))
+
 
 	def run(self, onlyReadPhase):
 
@@ -343,7 +393,7 @@ class colpariOdooImportRun(models.Model):
 
 		try:
 			theImport = ImportContext(self)
-			theImport.run(onlyReadPhase)
+			theImport.run2(onlyReadPhase)
 			if doNotWrite and not onlyReadPhase:
 				savedMessages = self._copyMessages()
 				self.env.cr.rollback()
