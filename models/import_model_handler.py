@@ -94,7 +94,6 @@ class ImportModelHandler():
 		self.idMap			= {} 	# { remoteId : localId }
 		self.toCreate		= {} 	# { remoteId : { k :v, k :v... } }
 		self.toUpdate		= {} 	# { remoteId : { k :v, k :v... } }
-		self.pending		= {} 	# { remoteId : { k :v, k :v... } }
 
 		# keeps track of all remote key combinations to assure they are unique in the first place
 		self.remoteKeyUniquenessCheck = {} # {  kv1 : { kv2 : { k3v .. : set(remoteId) }}}
@@ -337,6 +336,8 @@ class ImportModelHandler():
 						self.modelName, fieldName, field
 					))
 
+			#FIXME: since we don't write o2m-fields for relying on their m2o-counterpart, assure that each counterpart will be imported
+
 		if not fieldsToImport:
 			raise ImportException(
 				"Empty import field list for {}".format(self.modelName), modelName=self.modelName
@@ -369,12 +370,14 @@ class ImportModelHandler():
 			dependencyIds = set()
 			for remoteId, remoteRecord in records.items():
 				relationFieldValue = remoteRecord.get(relationFieldName)
-				#if not self.__isMappedOrToBeCreated(relationFieldValue):
-				if relationFieldValue and not relationFieldValue[0] in relatedType.idMap:
-					dependencyIds.update(relationFieldValue)
-					dependenciesPerId.setdefault(remoteId, {}).setdefault(relatedType, set()).update(relationFieldValue)
+				if relationFieldValue:
+					relationIdsNotFound = list(filter(lambda x: x not in relatedType.idMap, relationFieldValue))
+					if relationIdsNotFound:
+						dependencyIds.update(relationIdsNotFound)
+						dependenciesPerId.setdefault(remoteId, {}).setdefault(relatedType, set()).update(relationIdsNotFound)
 
 			if dependencyIds:
+				#_logger.info("{}.{} depends on {}::{}".format(self.modelName, relationFieldName, relatedType, dependencyIds))
 				dependenciesPerTargetType.setdefault(relatedType, set()).update(dependencyIds)
 
 		return (dependenciesPerTargetType, dependenciesPerId)
@@ -382,6 +385,7 @@ class ImportModelHandler():
 	def __mapRecords(self, records, requiredDependenciesOnly):
 		''' - copy records and map remote ids in all relation fields to local ids
 			- if requiredDependenciesOnly remove all non-required relation fields from result
+			- remove all o2m-fields where we also import the corresponding m2o field anyway
 			- apply configured field value mappings
 			- convert many2One fields to single values since we handle them as lists internally
 		'''
@@ -391,34 +395,39 @@ class ImportModelHandler():
 		for remoteId, remoteRecord in records.items():
 			result[remoteId] = dict(remoteRecord) # copy
 
+		o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
+
 		for fieldName, field in self.getFieldsToImport().items():
-			if fieldName in relFields:
-			# relation field
-				if requiredDependenciesOnly and not field.get('required'):
-					# remove non-required relations if requested
-					for remoteRecord in result.values():
-						remoteRecord.pop(fieldName, 0)
-				else:
-					# map relation field
-					relatedType = self.shouldFollowDependency(fieldName) # should never be False here
-					for remoteRecord in result.values():
-						relationFieldValue = remoteRecord.get(fieldName)
-						if relationFieldValue:
-							try:
-								mappedIds = list(map(relatedType.idMap.__getitem__, relationFieldValue))
-							except KeyError:
-								raise Exception("Missing mapped value for {} of field {} in idMap of {}. Record (out of {}) is: {}\nidMap:{}".format(
-									relationFieldValue, fieldName, self.modelName, len(result), remoteRecord, relatedType.idMap
-								))
-							remoteRecord[fieldName] = (
-								mappedIds[0] # convert many2One fields to single values since we handle them as lists internally
-									if field.get('type') == 'many2one' else
-								mappedIds
-							)
+			removeThisField = (
+				(requiredDependenciesOnly and not field.get('required'))
+				or
+				(fieldName in o2mFieldsWeImportTargetsOf) #FIXME: this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
+			)
+			if removeThisField:
+			# this is to be removed because of requiredDependenciesOnly == True or o2m-field handling
+				for remoteRecord in result.values():
+					remoteRecord.pop(fieldName, 0)
+			elif fieldName in relFields:
+			# relation field to map
+				relatedType = self.shouldFollowDependency(fieldName) # should never be False here
+				for remoteRecord in result.values():
+					relationFieldValue = remoteRecord.get(fieldName)
+					if relationFieldValue:
+						try:
+							mappedIds = list(map(relatedType.idMap.__getitem__, relationFieldValue))
+						except KeyError:
+							raise Exception("Missing mapped value for {} of field {} in idMap of {} record (out of {}) is: {}\nidMap: {}".format(
+								relationFieldValue, fieldName, self.modelName, len(result), remoteRecord, relatedType.idMap
+							))
+						remoteRecord[fieldName] = (
+							mappedIds[0] # convert many2One fields to single values since we handle them as lists internally
+								if field.get('type') == 'many2one' else
+							mappedIds
+						)
 
 
 			else:
-			# normal field
+			# normal field to map
 				fc = self.getFieldConfig(fieldName)
 				defaultValue = fc and fc.mapsToDefaultValue()
 				decimalPrecision = fc and fc.decimal_precision
@@ -492,7 +501,7 @@ class ImportModelHandler():
 		return self.toCreate or self.toUpdate or self.keyMaterial or self.idMap
 
 	def hasWork(self):
-		return self.toCreate or self.toUpdate
+		return self.toCreate or self.toUpdate or self.keyMaterial
 
 	def tryCreate(self, dependencyIdsToResolve):
 
@@ -759,7 +768,7 @@ class ImportModelHandler():
 						"Inconsistent worklist state for {}:\nidsToImport : {}\n2create    : {}\n2update    :{}\npending    :{}\nidMap      :{}".format(
 							self.modelName, idsToImport, self.toCreate.keys(), self.toUpdate.keys(), self.keyMaterial.keys(), self.idMap.keys()
 					))
-
+				#_logger.info("{} reading data for {} ids".format(self.modelName, len(idsToImport)))
 				# read ids to import and put into toCreate/toUpdate
 				remoteData = self._readRemoteDataAndCollectDepenencies(idsToImport, dependencyIdsToResolve)
 				for remoteId, remoteRecord in remoteData.items():
@@ -940,7 +949,7 @@ class ImportModelHandler():
 		#TODO: add remote consideration domain
 		records = self.remoteOdoo.readData(
 			self.modelName, idFieldNames,
-		 	self.importConfig.getTimeFilterDomain() if ids2Fetch == None else None,
+			self.importConfig.getTimeFilterDomain() if ids2Fetch == None else None,
 			self.log, ids = ids2Fetch
 		)
 

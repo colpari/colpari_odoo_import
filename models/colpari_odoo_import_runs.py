@@ -145,20 +145,24 @@ class ImportContext():
 				if not dependencyIds: # sanity check
 					raise Exception("Empty dependency list")
 
+				#_logger.info("{} crawl -> {}".format(handler.modelName, dependencyIds))
+
 				if handler.hasImportStrategy('import', 'match'):
 					handler.fetchRemoteKeys(dependencyIds)
 					handler.resolveReadAndSchedule(dependencyIdsToResolve)
 				elif handler.hasImportStrategy('dependency'):
-					# records with type dependency go straight to update
-					bulkData = handler._readRemoteDataAndCollectDepenencies(dependencyIds, dependencyIdsToResolve)
-					_logger.info("{} bulk records of type {}".format(len(bulkData), handler))
-					handler.toCreate.update(bulkData)
+					# records with type dependency go straight to create, if they are not there already
+					# TODO: is this a lower level decision and should maybe be handled further down the call chain?
+					newBulkIds = dependencyIds - handler.toCreate.keys() - handler.toUpdate.keys()
+					if newBulkIds:
+						handler.toCreate.update(
+							handler._readRemoteDataAndCollectDepenencies(newBulkIds, dependencyIdsToResolve)
+						)
+						_logger.info("{} : added {} bulk records".format(handler.modelName, len(newBulkIds)))
 				else:
 					raise Exception("type {} phase {} : import strategy {} should not occur here".format(
 						handler, phaseInformational, handler.importStrategy
 					))
-
-				_logger.info("{} reading phase pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
 
 		return i
 
@@ -211,6 +215,7 @@ class ImportContext():
 				_pass+=1
 				finished = True
 				handlersSucceeded = 0
+				dependencyIdsToResolve = {}
 
 				for handler in configuredHandlers:
 					dataToProcess = ((handler.toCreate or handler.keyMaterial) if IS_CREATE else handler.toUpdate)
@@ -226,16 +231,26 @@ class ImportContext():
 						# but not all objects (yet)
 						finished = False
 
-				_logger.info("phase {} pass #{}, {}/{} handlers succeeded, finished={}".format(
-					phaseName, _pass, handlersSucceeded, len(configuredHandlers), finished
-				))
-
 				if not handlersSucceeded:
 					self.__logHandlerStatus()
 					self.log('0_error', "Nothing found writeable in {} pass #{}".format(phaseName, _pass))
 					return
 
-				self.__crawl(dependencyIdsToResolve, phaseInformational = 2)
+				if dependencyIdsToResolve:
+					# create phase may yield new dependencies and they in turn might yield new objects to create
+					if not IS_CREATE:
+						self.__logHandlerStatus(notInUI = True)
+						raise Exception("There should be no new dependencies turning up in 'update' phase")
+					# crawl dependencies
+					self.__crawl(dependencyIdsToResolve, phaseInformational = 2)
+					# check if we're really finished of if any handler still has somethin toCreate
+					if finished:
+						finished = not any(map(lambda handler: handler.toCreate, configuredHandlers))
+
+				_logger.info("phase {} pass #{}, {}/{} handlers succeeded, finished={}".format(
+					phaseName, _pass, handlersSucceeded, len(configuredHandlers), finished
+				))
+
 				self.__logHandlerStatus(notInUI = True)
 
 		return True
