@@ -8,7 +8,7 @@ import xmlrpc.client
 import traceback
 import time
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger("colpari_odoo_import")
 _logLevelMap = {
 	'3_debug' 	: logging.INFO, #logging.DEBUG,
 	'2_info' 	: logging.INFO,
@@ -348,7 +348,7 @@ class ImportModelHandler():
 
 		return True
 
-	def _getDependenciesOfRecords(self, records, requiredOnly):
+	def __getUnresolvedDependenciesOfRecords(self, records, requiredOnly):
 
 		dependenciesPerTargetType = {}
 		dependenciesPerId = {}
@@ -369,7 +369,8 @@ class ImportModelHandler():
 			dependencyIds = set()
 			for remoteId, remoteRecord in records.items():
 				relationFieldValue = remoteRecord.get(relationFieldName)
-				if relationFieldValue:
+				#if not self.__isMappedOrToBeCreated(relationFieldValue):
+				if relationFieldValue and not relationFieldValue[0] in relatedType.idMap:
 					dependencyIds.update(relationFieldValue)
 					dependenciesPerId.setdefault(remoteId, {}).setdefault(relatedType, set()).update(relationFieldValue)
 
@@ -388,7 +389,7 @@ class ImportModelHandler():
 		result = {}
 		# copy all records
 		for remoteId, remoteRecord in records.items():
-			destination = result[remoteId] = dict(remoteRecord) # copy
+			result[remoteId] = dict(remoteRecord) # copy
 
 		for fieldName, field in self.getFieldsToImport().items():
 			if fieldName in relFields:
@@ -403,7 +404,12 @@ class ImportModelHandler():
 					for remoteRecord in result.values():
 						relationFieldValue = remoteRecord.get(fieldName)
 						if relationFieldValue:
-							mappedIds = list(map(relatedType.idMap.__getitem__, relationFieldValue))
+							try:
+								mappedIds = list(map(relatedType.idMap.__getitem__, relationFieldValue))
+							except KeyError:
+								raise Exception("Missing mapped value for {} of field {} in idMap of {}. Record (out of {}) is: {}\nidMap:{}".format(
+									relationFieldValue, fieldName, self.modelName, len(result), remoteRecord, relatedType.idMap
+								))
 							remoteRecord[fieldName] = (
 								mappedIds[0] # convert many2One fields to single values since we handle them as lists internally
 									if field.get('type') == 'many2one' else
@@ -434,31 +440,6 @@ class ImportModelHandler():
 
 		return result
 
-	def __removeResolvedDependenciesFrom(self, dependenciesPerTargetType, dependenciesPerId = None):
-		# see which ones are completely resolved and remove them
-		for handler, dependencyIds in dict(dependenciesPerTargetType).items():
-			(yes, no, pending) = handler.resolve(dependencyIds)
-			if not (no or pending):
-			# all resolved
-				del dependenciesPerTargetType[handler]
-				if dependenciesPerId:
-					for remoteId, dependencyInfo in dependenciesPerId.items():
-						dependencyInfo.pop(handler, 0)
-			elif yes and dependenciesPerId:
-			# at lease some are resolved. remove from dependenciesPerId
-				for remoteId, dependencyInfo in dependenciesPerId.items():
-					_deps = dependencyInfo.get(handler)
-					if _deps:
-						_deps.difference_update(yes) # remove resolved
-						if not _deps: # all resolved
-							del dependencyInfo[handler]
-
-		# remove (now) empty entries from dependenciesPerId
-		if dependenciesPerId:
-			for remoteId, dependencyInfo in dict(dependenciesPerId.items()).items():
-				if not dependencyInfo:
-					del dependenciesPerId[remoteId]
-
 	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
 		# fetch remote data
 		if not remoteIds:
@@ -466,7 +447,7 @@ class ImportModelHandler():
 		remoteData = self.readRemoteData(remoteIds)
 
 		#TODO: are there cases where we could go with requiredOnly = True and thus save time?
-		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(remoteData, requiredOnly = False)
+		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(remoteData, requiredOnly = False)
 
 		for _type, ids in dependenciesPerTargetType.items():
 			dependencyIdsToResolve.setdefault(_type, set()).update(ids)
@@ -498,8 +479,9 @@ class ImportModelHandler():
 
 	def status(self):
 		checkSum = set(self.idMap.keys()) ^ (self.keyMaterial and self.keyMaterial.keys() or set()) ^ self.toUpdate.keys() ^ self.toCreate.keys()
-		return "{} \t({}/{}): \t{} keys, \t{} resolved, \t{} to update, \t{} to create \t(checkSum={})".format(
-			self.modelName, self.importStrategy, self.matchingStrategy,
+		return "{} {} \t{} \t: \t{} keys, \t{} \tmapped, \t{} \tto update, \t{} \tto create \t(checkSum={})".format(
+			#TODO: it would be really neat to shorten model names the java way: accouńt.fiscal.position -> a.f.position
+			self.modelName.ljust(25), self.importStrategy, self.matchingStrategy,
 			len(self.keyMaterial or []), len(self.idMap), len(self.toUpdate), len(self.toCreate), len(checkSum)
 		)
 
@@ -509,118 +491,25 @@ class ImportModelHandler():
 	def hasContent(self):
 		return self.toCreate or self.toUpdate or self.keyMaterial or self.idMap
 
-	def readIncremental(self, ids, dependencyIdsToResolve):
-		if not ids:
-			raise Exception("Empty id list")
-		''' TODO:
-			- ALTERNATIVES:
-				1. apply time filter only to leading objects
-				2. avoid ref-keys
-				3. another strategy for res.partner
-		'''
+	def hasWork(self):
+		return self.toCreate or self.toUpdate
 
-		if self.importStrategy != 'import':
-			raise Exception("readIncremental({}) : unsupported import strategy: '{}".format(self.modelName, self.importStrategy))
+	def tryCreate(self, dependencyIdsToResolve):
+
+		if not self.hasImportStrategy('import', 'dependency'):
+			raise Exception("tryCreate({}) should not be called for importStrategy '{}'".format(self.modelName, self.importStrategy))
 
 		if self.importStrategy == 'import':
-			self.fetchRemoteKeys(ids)
-			(resolvedIds, unresolvedIds, pendingIds) = self.resolve(ids)
-
-			# determine which remote objects we need to read
-			#idsToImport = set(pendingIds) #TODO: these might be (partially) unneeded, but we don't know yet
-			idsToImport = set()
-
-			if self.modelConfig.do_create:
-				idsToImport.update(unresolvedIds)
-
-			if self.modelConfig.do_update:
-				idsToImport.update(resolvedIds)
-
-			idsToImport = idsToImport - self.toCreate.keys() - self.toUpdate.keys() - self.idMap.keys()
-			_logger.info("{} {} ids to import".format(self.modelName, len(idsToImport)))
-			if idsToImport:
-				# read ids to import and put into toCreate/toUpdate
-				remoteData = self._readRemoteDataAndCollectDepenencies(idsToImport, dependencyIdsToResolve)
-				for remoteId, remoteRecord in remoteData.items():
-					if remoteId in unresolvedIds or remoteId in pendingIds:
-						self.toCreate[remoteId] = remoteRecord
-					elif remoteId in resolvedIds:
-						self.toUpdate[remoteId] = remoteRecord
-					else: # sanity check
-						raise Exception(
-							"ID {} for {} should be either in resolved, unresolved or pending:\nrequested: {}\nresolved: {}\nunresolved: {}".format(
-								remoteId, self.modelName, ids, resolvedIds, unresolvedIds
-							)
-						)
-		elif self.importStrategy == 'match':
-			self.fetchRemoteKeys(ids)
-			(resolvedIds, unresolvedIds, pendingIds) = self.resolve(ids)
-			# all must be resolved or pending
-			if unresolvedIds:
-				someUnresolvedKeys = map(self.keyMaterial.get, list(unresolvedIds)[:30])
-				raise ImportException(
-					"{} remote records of type {} could not be resolved locally:\n{}".format(
-						len(unresolvedIds), self.modelName,
-						# list the remoteKeys info for at most 30 of the failing ids
-						"\n".join(map(str, someUnresolvedKeys))
-					),
-					# kwargs for log entry
-					modelName = self.modelName, dependencyType = self.modelName
-				)
-
-		elif self.importStrategy == 'dependency':
-			ids2Read = ids - self.toCreate.keys()
-			remoteData = self._readRemoteDataAndCollectDepenencies(ids2Read, dependencyIdsToResolve)
-			self.toCreate.update(remoteData)
-
-		else:
-			raise Exception("Unhandled model import strategy '{}' for {}".format(self.importStrategy, self.modelName))
-
-	def updateResolvingStatus(self):
-		''' preparations before the actual create run '''
-		# # remove data from o2m-fields if we also import the target type of
-		# # we needed to read this to discover all dependencies but for writing, these relations should be written by
-		# # the corresponding m2o-field
-		# # FIXME: this needs only to be done at the first create run
-		# o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
-		# if o2mFieldsWeImportTargetsOf:
-		# 	for remoteRecord in self.toCreate.values():
-		# 		for fn in o2mFieldsWeImportTargetsOf.keys():
-		# 			remoteRecord.pop(fn, 0)
-
-		# update us with the actual resolving situation four ourselves. it might still to be decided if some objects get
-		# created or updated
-		(resolvedIds, unresolvedIds, pendingIds) = self.resolve(self.toCreate.keys())
-		# _logger.info("{} CI {} / {} / {}".format(
-		# 	self.modelName, len(resolvedIds), len(unresolvedIds), len(pendingIds)
-		# ))
-		for resolvedId in resolvedIds: # resolved ones go to update
-			if resolvedId in self.toUpdate: raise Exception(
-				"{} id {} should not yet be present in self.toUpdate()".format(self.modelName, resolvedId)
-			)
-			resolvedRecord = self.toCreate.pop(resolvedId)
-			if self.modelConfig.do_update:
-				self.toUpdate[resolvedId] = resolvedRecord
-
-		return pendingIds
-
-	def tryCreate(self):
+			self.resolveReadAndSchedule(dependencyIdsToResolve)
 
 		if not self.toCreate:
-			return True
+			# nothing queued for create. return success if there are also no unresolved keys
+			return not self.keyMaterial
 
-		pendingIds = self.updateResolvingStatus()
-		if pendingIds:
-			_logger.info("{} has {} pending ids".format(self.modelName, len(pendingIds)))
-			return False
+		# fetch unsatisfied dependencies of self.toCreate
+		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(self.toCreate, requiredOnly = True)
 
-
-		# fetch dependencies of self.toCreate
-		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(self.toCreate, requiredOnly = True)
-		# remove resolved dependencies
-		self.__removeResolvedDependenciesFrom(dependenciesPerTargetType, dependenciesPerId)
-
-		# check which objects are fully resolved now and can be created
+		# check which object dependencies are fully resolved now and can be created
 		_toCreate = {}
 		_toTryLater = {}
 
@@ -727,20 +616,21 @@ class ImportModelHandler():
 
 		return wouldChange
 
-	def __logUpdateObjectFailed(self, localId, localObject, remoteId, dataToUpdate, e):
+	def __logUpdateObjectFailed(self, localId, localObject, remoteId, remoteRecord, dataToUpdate, e):
 		currentObjContent = str(
 			{ fn : localObject[fn] for fn in localObject._fields.keys() }
 		)
-		msg = "update for {}.{} (remoteId={}) with data {} FAILED: {}\ncurrent content:{}".format(
-				self.modelName, localId, remoteId, dataToUpdate, e, currentObjContent
+		msg = "update for {}.{} (remoteId={}) with FAILED: {}\ncurrent content:{}\nupdate content :{}\nremote content :{}".format(
+				self.modelName, localId, remoteId, e, currentObjContent, dataToUpdate, remoteRecord
 			)
 
+		# debug unbalanced account.moves when account.move.line update fails
 		if localObject._name == 'account.move.line':
 			for line in localObject.move_id.line_ids:
 				msg+="\n{} cred={}, deb={}, bal={}".format(line, line.credit, line.debit, line.balance)
 			csum = sum(localObject.move_id.line_ids.mapped('credit'))
 			dsum = sum(localObject.move_id.line_ids.mapped('debit'))
-			bsum = sum(localObject.move_id.line_ids.mapped('debit'))
+			bsum = sum(localObject.move_id.line_ids.mapped('balance'))
 			msg+="\ncsum={}, dsum={}, bsum={}, +/- c/d = {}".format(csum, dsum, bsum, csum-dsum)
 
 		return msg
@@ -749,8 +639,7 @@ class ImportModelHandler():
 		if not self.toUpdate:
 			return True
 
-		(dependenciesPerTargetType, dependenciesPerId) = self._getDependenciesOfRecords(self.toUpdate, requiredOnly = False)
-		self.__removeResolvedDependenciesFrom(dependenciesPerTargetType)
+		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(self.toUpdate, requiredOnly = False)
 
 		# any unresolved dependencies left?
 		if dependenciesPerTargetType:
@@ -784,6 +673,7 @@ class ImportModelHandler():
 			localId = self.idMap[remoteId]
 			localObject = localObjects[localId]
 			try:
+				#FIXME: evaluate uif we want this
 				# #if self.__wouldBeChangedBy(localObject, dataToUpdate):
 				# 	# only call update if we really have different values
 				# 	#localObject.update(dataToUpdate)
@@ -800,7 +690,7 @@ class ImportModelHandler():
 
 			except Exception as e:
 				failed +=1
-				msg = self.__logUpdateObjectFailed(localId, localObject, remoteId, dataToUpdate, e)
+				msg = self.__logUpdateObjectFailed(localId, localObject, remoteId, self.toUpdate[remoteId], dataToUpdate, e)
 				if failed == 30:
 					raise ImportException(msg, modelName = self.modelName)
 				else:
@@ -851,7 +741,8 @@ class ImportModelHandler():
 		# importStrategy is import and we need to schedule:
 
 		if self.importStrategy == 'import':
-			idsToImport = set()
+			#idsToImport = set()
+			idsToImport = set(pendingIds) # we need to read these to resolve their dependencies
 
 			if self.modelConfig.do_create:
 				idsToImport.update(unresolvedIds)
@@ -859,13 +750,13 @@ class ImportModelHandler():
 			if self.modelConfig.do_update:
 				idsToImport.update(resolvedIds)
 
-			_logger.info("{} {} ids to import".format(self.modelName, len(idsToImport)))
 			if idsToImport:
+				#_logger.info("{} {} ids to import".format(self.modelName, len(idsToImport)))
 				# sanity check. none of idsToImport should be on the final worklists yet
 				duplicates = idsToImport & (self.toCreate.keys() | self.toUpdate.keys())
 				if duplicates:
 					raise Exception(
-						"Insonsistent worklist state for {}:\nidsToImport : {}\n2create    : {}\n2update    :{}\npending    :{}\nidMap      :{}".format(
+						"Inconsistent worklist state for {}:\nidsToImport : {}\n2create    : {}\n2update    :{}\npending    :{}\nidMap      :{}".format(
 							self.modelName, idsToImport, self.toCreate.keys(), self.toUpdate.keys(), self.keyMaterial.keys(), self.idMap.keys()
 					))
 
@@ -883,7 +774,7 @@ class ImportModelHandler():
 							"ID {} for {} should be either in resolved, unresolved or pending:\nrequested: {}\nresolved: {}\nunresolved: {}\npending: {}".format(
 								remoteId, self.modelName, idsToImport, resolvedIds, unresolvedIds, pendingIds
 							)
-						)				
+						)
 
 	def __resolve(self):
 		''' splits the provided id set in 3 distincs sets:
@@ -903,11 +794,15 @@ class ImportModelHandler():
 		unresolvedIds 	= set()
 		pendingIds		= set()
 
+		if not self.keyMaterial:
+			return (resolvedIds, unresolvedIds, pendingIds)
+
 		if self.keyMaterial.keys() & (self.toCreate.keys() | self.toUpdate.keys() | self.idMap.keys()):
 			raise Exception(
 				"Insonsistent worklist state for {}:\nkeyMaterial : {}\n2create    : {}\n2update    :{}\nidMap    :{}".format(
 					self.modelName, self.keyMaterial.keys(), self.toCreate.keys(), self.toUpdate.keys(), self.idMap.keys()
 			))
+
 		relationKeyFieldsHandlers = {} # for fast access to handlers of id fields which are relations
 		for idFieldName in self._getRemoteIdFields():
 			relatedTypeName = self.getLocalFields()[idFieldName].get('relation')
@@ -946,7 +841,6 @@ class ImportModelHandler():
 					# copy the keys and try to map their relation id values
 					_originalRemoteKeys = dict(remoteKeys)
 					for fieldName, handler in relationKeyFieldsHandlers.items():
-						#FIXME: if a *2many field gets configured as key field this whill blow up -> forbid in checkConfig()
 						mappedId = handler.idMap.get(remoteKeys[fieldName])
 						if mappedId:
 							remoteKeys[fieldName] = mappedId
@@ -954,7 +848,7 @@ class ImportModelHandler():
 							# the remote relation key is not resolveable (yet) so this object is unresolved too
 							cannotResolveRemoteRelationKey = True
 							_logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
-								self.modelName, remoteKeys, remoteId, handler.modelName
+								self.modelName, remoteKeys, remoteId, handler.modelName#, handler.idMap
 							))
 							break
 
@@ -1044,7 +938,11 @@ class ImportModelHandler():
 		idFieldsWhichAreKeys = { fn for fn in idFieldNames if self.getLocalFields()[fn].get('relation') }
 
 		#TODO: add remote consideration domain
-		records = self.remoteOdoo.readData(self.modelName, idFieldNames, self.importConfig.getTimeFilterDomain(), self.log, ids = ids2Fetch)
+		records = self.remoteOdoo.readData(
+			self.modelName, idFieldNames,
+		 	self.importConfig.getTimeFilterDomain() if ids2Fetch == None else None,
+			self.log, ids = ids2Fetch
+		)
 
 		_logger.info("{} : read idFields {} of {} remote records (from {} ids)".format(
 			self.modelName, idFieldNames, len(records), len(ids2Fetch or []))
@@ -1142,4 +1040,3 @@ class ImportModelHandler():
 		return { # return data for all requested ids from cache
 			_id : self.remoteData[_id] for _id in ids
 		}
-

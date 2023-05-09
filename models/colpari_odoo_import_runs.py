@@ -9,7 +9,7 @@ import traceback
 
 from .import_model_handler import ImportModelHandler, ImportException
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger("colpari_odoo_import")
 _logLevelMap = {
 	'3_debug' 	: logging.DEBUG,
 	'2_info' 	: logging.INFO,
@@ -44,12 +44,19 @@ class OdooConnection():
 
 	def readData(self, modelName, fieldsToRead, searchDomain, _logFn, ids = None):
 		''' read all objects or specific ids of a type '''
-		specificIds = ids != None
-		result = (
-			self.modelCall(modelName, 'read', list(ids), fields = list(fieldsToRead))
-				if ids != None else
-			self.modelCall(modelName, 'search_read', searchDomain, fields = list(fieldsToRead))
-		)
+		if ids != None:
+			if not ids:
+				raise Exception("Empty id set")
+			result = self.modelCall(modelName, 'read', list(ids), fields = list(fieldsToRead))
+			# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
+			# 		len(result), modelName, len(ids or []), len(fieldsToRead)
+			# ))
+		else:
+			result = self.modelCall(modelName, 'search_read', searchDomain, fields = list(fieldsToRead))
+			# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields, domain={}".format(
+			# 		len(result), modelName, len(ids or []), len(fieldsToRead), searchDomain
+			# ))
+
 		# #_logFn('3_debug',
 		# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
 		# 		len(result), modelName, len(ids or []), len(fieldsToRead)
@@ -63,7 +70,7 @@ class ImportContext():
 		self.importRun 		= importRun
 		self.log 			= importRun._log
 		self.importConfig 	= importRun.import_config
-		
+
 		self._sharedDependencyWorkList = {
 			# handler : {
 			#	remoteId : {
@@ -115,45 +122,18 @@ class ImportContext():
 		else:
 			return _all
 
-	def __logHandlerStatus(self):
+	def __logHandlerStatus(self, notInUI = False):
 
 		#for handler in self.getConfiguredHandlers():
 		for handler in self._handlers.values():
-			handler.updateResolvingStatus()
-			if handler.hasContent():
-				self.log('2_info', handler.status(), modelName=handler.modelName)
+			#handler.updateResolvingStatus()
+			if handler.hasWork():
+				if notInUI:
+					_logger.info(handler.status())
+				else:
+					self.log('2_info', handler.status(), modelName=handler.modelName)
 
-	def run2(self, onlyReadPhase):
-		'''
-			Tree shaking:
-				- discover: main import types id-less read of keys
-					- resolve -> (r,u,p)
-					- (r?,u?) -> read data and schedule -> (2c, 2u, p)
-				
-				- collect dependencies for (2c, 2u) unless target type has 'bulk'
-				- while dependencies and not numb
-					- read dep keys 
-					- resolve dep keys and p -> (r,u,p)
-					- if strategy == import 
-						- (r?,u?) -> read data and schedule -> (2c, 2u, p)
-
-				- p=0
-				- (2c, 2u) -> read related "bulk" types -> 2c
-
-		'''
-		configuredHandlers = list(self.getConfiguredHandlers())
-
-		# first pass. fetch keys of import & match types, resolve and schedule 
-		dependencyIdsToResolve = {}
-
-		for handler in self.getConfiguredHandlers('import', 'match'):
-			handler.fetchRemoteKeys(ids = None)
-
-		for handler in self.getConfiguredHandlers('import', 'match'):
-			handler.resolveReadAndSchedule(dependencyIdsToResolve)
-
-		_logger.info("phase 0 complete")
-
+	def __crawl(self, dependencyIdsToResolve, phaseInformational):
 		i = 0
 		# read all dependency objects and maybe collect their dependencies. loop until no new dependencies are discovered
 		while dependencyIdsToResolve:
@@ -168,17 +148,97 @@ class ImportContext():
 				if handler.hasImportStrategy('import', 'match'):
 					handler.fetchRemoteKeys(dependencyIds)
 					handler.resolveReadAndSchedule(dependencyIdsToResolve)
-				elif handler.hasImportStrategy == 'dependency':
-					handler._readRemoteDataAndCollectDepenencies(dependencyIds, dependencyIdsToResolve)
+				elif handler.hasImportStrategy('dependency'):
+					# records with type dependency go straight to update
+					bulkData = handler._readRemoteDataAndCollectDepenencies(dependencyIds, dependencyIdsToResolve)
+					_logger.info("{} bulk records of type {}".format(len(bulkData), handler))
+					handler.toCreate.update(bulkData)
 				else:
-					raise Exception("phase 1 type {} : import strategy {} should not occur here".format(
-						handler, handler.importStrategy
+					raise Exception("type {} phase {} : import strategy {} should not occur here".format(
+						handler, phaseInformational, handler.importStrategy
 					))
 
 				_logger.info("{} reading phase pass {} with {} ids".format(handler.modelName, i, len(dependencyIds)))
 
-		_logger.info("reading phase finished after {} iterations".format(i))
+		return i
 
+	def run2(self, onlyReadPhase):
+		'''
+			Tree shaking:
+				- discover: main import types id-less read of keys
+					- resolve -> (r,u,p)
+					- (r?,u?) -> read data and schedule -> (2c, 2u, p)
+
+				- collect dependencies for (2c, 2u) unless target type has 'bulk'
+				- while dependencies and not numb
+					- read dep keys
+					- resolve dep keys and p -> (r,u,p)
+					- if strategy == import
+						- (r?,u?) -> read data and schedule -> (2c, 2u, p)
+
+				- p=0
+				- (2c, 2u) -> read related "bulk" types -> 2c
+
+		'''
+		configuredHandlers = list(self.getConfiguredHandlers())
+
+		# first pass. fetch keys of import & match types, resolve and schedule
+		dependencyIdsToResolve = {}
+
+		for handler in self.getConfiguredHandlers('import', 'match'):
+			handler.fetchRemoteKeys(ids = None)
+
+		for handler in self.getConfiguredHandlers('import', 'match'):
+			handler.resolveReadAndSchedule(dependencyIdsToResolve)
+
+		_logger.info("phase 0 complete")
+
+		iterations = self.__crawl(dependencyIdsToResolve, phaseInformational = 1)
+
+		_logger.info("phase 1 finished after {} iterations".format(iterations))
+
+		#TODO: provide todo-info logged by below line more prominent(ly?) in UI
+		self.__logHandlerStatus()
+
+		if onlyReadPhase:
+			return False
+
+		for IS_CREATE in (True, False): # first process objects to create, then update
+			phaseName = 'create' if IS_CREATE else 'update'
+			finished = False
+			_pass = 0
+			while not finished:
+				_pass+=1
+				finished = True
+				handlersSucceeded = 0
+
+				for handler in configuredHandlers:
+					dataToProcess = ((handler.toCreate or handler.keyMaterial) if IS_CREATE else handler.toUpdate)
+					if not dataToProcess:
+						# nothing to do (anymore) for this type
+						#handlersSucceeded += 1
+						continue
+					processedCount = handler.tryCreate(dependencyIdsToResolve) if IS_CREATE else handler.tryUpdate()
+					if processedCount:
+						# we created/updates some objects of this type. progess! :)
+						handlersSucceeded += 1
+					if processedCount < len(dataToProcess):
+						# but not all objects (yet)
+						finished = False
+
+				_logger.info("phase {} pass #{}, {}/{} handlers succeeded, finished={}".format(
+					phaseName, _pass, handlersSucceeded, len(configuredHandlers), finished
+				))
+
+				if not handlersSucceeded:
+					self.__logHandlerStatus()
+					self.log('0_error', "Nothing found writeable in {} pass #{}".format(phaseName, _pass))
+					return
+
+				self.__crawl(dependencyIdsToResolve, phaseInformational = 2)
+				self.__logHandlerStatus(notInUI = True)
+
+		return True
 
 	def run(self, onlyReadPhase):
 
@@ -393,14 +453,14 @@ class colpariOdooImportRun(models.Model):
 
 		try:
 			theImport = ImportContext(self)
-			theImport.run2(onlyReadPhase)
+			runResult = theImport.run2(onlyReadPhase)
 			if doNotWrite and not onlyReadPhase:
 				savedMessages = self._copyMessages()
 				self.env.cr.rollback()
 				self.messages.unlink()
 				self.messages.create(savedMessages)
-			self.state = 'finished'
-			self._log("2_info","============= SUCCESS (changes saved = {}) =============".format(not doNotWrite))
+			self.state = 'finished' if runResult else 'failed'
+			self._log("2_info","============= {} (changes saved = {}) =============".format(self.state.upper(), not doNotWrite))
 
 		except ImportException as ie:
 			txt = traceback.format_exc()
