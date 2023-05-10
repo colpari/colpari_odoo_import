@@ -398,16 +398,18 @@ class ImportModelHandler():
 		o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
 
 		for fieldName, field in self.getFieldsToImport().items():
-			removeThisField = (
-				(requiredDependenciesOnly and not field.get('required'))
-				or
-				(fieldName in o2mFieldsWeImportTargetsOf) #FIXME: this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
-			)
-			if removeThisField:
-			# this is to be removed because of requiredDependenciesOnly == True or o2m-field handling
-				for remoteRecord in result.values():
-					remoteRecord.pop(fieldName, 0)
-			elif fieldName in relFields:
+			if fieldName in relFields:
+			# relation field
+				removeThisField = (
+					(requiredDependenciesOnly and not field.get('required'))
+					or
+					(fieldName in o2mFieldsWeImportTargetsOf) #FIXME: this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
+				)
+				if removeThisField:
+					# this is to be removed because of requiredDependenciesOnly == True or o2m-field handling
+					for remoteRecord in result.values():
+						remoteRecord.pop(fieldName, 0)
+					continue
 			# relation field to map
 				relatedType = self.shouldFollowDependency(fieldName) # should never be False here
 				for remoteRecord in result.values():
@@ -592,6 +594,8 @@ class ImportModelHandler():
 		# 		have it for updating self.idMap below
 		# FIXME: unit test
 		i = 0
+		# _logger.info("{} 2 create: {}".format(self.modelName, recordsToCreate))
+		# _logger.info("{} created : {}".format(self.modelName, createResult))
 		for created in createResult:
 			self.idMap[recordsToCreate[i]['id']] = created['id']
 			i+=1
