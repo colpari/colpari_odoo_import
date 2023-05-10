@@ -425,6 +425,8 @@ class colpariOdooImportRun(models.Model):
 	@api.depends('messages')
 	def _computeMessages(self):
 		for record in self:
+			record.messages_debug = self.env['colpari.odoo_import_run_message']
+			record.messages_non_debug = self.env['colpari.odoo_import_run_message']
 			for m in record.messages:
 				if m.level == '3_debug':
 					record.messages_debug += m

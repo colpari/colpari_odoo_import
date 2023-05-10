@@ -860,9 +860,9 @@ class ImportModelHandler():
 						else:
 							# the remote relation key is not resolveable (yet) so this object is unresolved too
 							cannotResolveRemoteRelationKey = True
-							_logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
-								self.modelName, remoteKeys, remoteId, handler.modelName#, handler.idMap
-							))
+							# _logger.info("{} cannot (yet) resolve key {} for remote id {} because of missing {} data".format(
+							# 	self.modelName, remoteKeys, remoteId, handler.modelName#, handler.idMap
+							# ))
 							break
 
 				if cannotResolveRemoteRelationKey:
