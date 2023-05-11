@@ -102,14 +102,21 @@ class ImportContext():
 
 		# create handlers for all configured models
 		# 	(for unconfigured types we just create default handlers on-the-fly)
+		# check if we have at least one stategy import handler with do_ivot
+		haveOneImportPivotHandler = False
 		for modelConfig in self.importConfig.model_configs:
 			self.getHandler(modelConfig.import_model.model)
+			if modelConfig.do_pivot and modelConfig.model_import_strategy == 'import':
+				haveOneImportPivotHandler = True
+
+		if not haveOneImportPivotHandler:
+			raise ImportException("At least one model must have strategy 'import' and 'do_pivot' == True")
 
 		# run checkConfig (NOTE: required, finishes handler setup and may create more handlers)
 		for handler in list(self._handlers.values()):
 			handler.checkConfig()
 
-		_logger.info("global time filter domain is: {}".format(self.importConfig.getTimeFilterDomain()))
+		#_logger.info("global time filter domain is: {}".format(self.importConfig.getTimeFilterDomain()))
 
 
 	def getHandler(self, modelName):
@@ -177,15 +184,15 @@ class ImportContext():
 						handler, phaseInformational, handler.importStrategy
 					))
 
-		for handler in self.getConfiguredHandlers('import', 'match'):
-			handler._resolve()
+		# for handler in self.getConfiguredHandlers('import', 'match'):
+		# 	handler._resolve()
 
 		return i
 
 	def run(self, onlyReadPhase):
 		'''
 			Tree shaking:
-				- discover: main import types id-less read of keys
+				- discover: main import types (id-less search of keys)
 					- resolve -> (r,u,p)
 					- (r?,u?) -> read data and schedule -> (2c, 2u, p)
 
@@ -206,10 +213,12 @@ class ImportContext():
 		dependencyIdsToResolve = {}
 
 		for handler in self.getConfiguredHandlers('import', 'match'):
-			handler.fetchRemoteKeys(ids = None)
+			if handler.modelConfig.do_pivot:
+				handler.fetchRemoteKeys(ids = None)
 
 		for handler in self.getConfiguredHandlers('import', 'match'):
-			handler.resolveReadAndSchedule(dependencyIdsToResolve)
+			if handler.modelConfig.do_pivot:
+				handler.resolveReadAndSchedule(dependencyIdsToResolve)
 
 		_logger.info("phase 0 complete")
 
@@ -234,11 +243,6 @@ class ImportContext():
 				dependencyIdsToResolve = {}
 
 				for handler in configuredHandlers:
-					# dataToProcess = ((handler.toCreate or handler.keyMaterial) if IS_CREATE else handler.toUpdate)
-					# if not dataToProcess:
-					# 	# nothing to do (anymore) for this type
-					# 	#handlersSucceeded += 1
-					# 	continue
 					(finished, progess)  = handler.tryCreate(dependencyIdsToResolve) if IS_CREATE else handler.tryUpdate()
 					finishedAll 		&= finished
 					progressMade		|= progess
@@ -424,7 +428,7 @@ class colpariOdooImportRun(models.Model):
 			self._log("2_info","============= {} (changes saved = {}) =============".format(self.state.upper(), not doNotWrite))
 
 		except ImportException as ie:
-			txt = traceback.format_exc()
+			txt = str(ie)
 			#self._log('0_error', str(ie), **ie.kwargs)
 			#self._log('0_error', str(ie), **ie.kwargs)
 			savedMessages = self._copyMessages()

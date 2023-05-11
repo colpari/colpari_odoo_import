@@ -64,6 +64,7 @@
                 <field name="import_model_name"/>
                 <field name="model_import_strategy"/>
                 <field name="matching_strategy"/>
+                <field name="do_pivot"/>
                 <field name="do_update"/>
                 <field name="do_create"/>
                 <field name="only_required_dependencies"/>
@@ -87,9 +88,10 @@
               <field name="import_model"/>
               <field name="model_import_strategy"/>
               <field name="matching_strategy"/>
-              <field name="only_required_dependencies"/>
+              <field name="do_pivot"/>
               <field name="do_update"/>
               <field name="do_create"/>
+              <field name="only_required_dependencies"/>
               <div>['|', ['field', '=', python_value], ['active', '=', python_value]]</div>
               <field name="model_remote_domain"/>
             </group>

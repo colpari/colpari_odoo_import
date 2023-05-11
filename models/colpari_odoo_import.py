@@ -134,7 +134,7 @@ class colpariOdooImportModelConfig(models.Model):
     _name = 'colpari.odoo_import_modelconfig'
     _description = 'Import configuration for a certain model'
 
-    _order = 'model_import_strategy DESC, import_model_name  ASC'
+    _order = 'model_import_strategy DESC, do_pivot DESC, import_model_name  ASC'
     _sql_constraints = [(
         'model_config_uniq', 'unique(import_config, import_model)',
         'Multiple configurations for the same model in one import configuration are not allowed'
@@ -151,16 +151,17 @@ class colpariOdooImportModelConfig(models.Model):
 
     import_model_name = fields.Char(related='import_model.model', store=True)
 
+    do_pivot = fields.Boolean(string="Pivot", default=False)
     do_create = fields.Boolean(string="Create new", default=True)
     do_update = fields.Boolean(string="Update existing", default=True)
 
     only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=False)
 
     model_import_strategy = fields.Selection([
-        ('import'       , 'Create/update'), #FIXME: (Artur) abolish this in favour of a ignored types list on colpari.odoo_import_config
-        ('bulk'         , 'Bulk dependency'), #FIXME: rename to 'bulk'
+        ('import'       , 'Create/update'),
+        ('bulk'         , 'Bulk dependency'),
         ('match'        , 'Match'),
-        ('ignore'       , 'Ignore'),
+        ('ignore'       , 'Ignore'), #FIXME: (Artur) abolish this in favour of a ignored types list on colpari.odoo_import_config
     ], default='import', required=True)
 
     matching_strategy = fields.Selection([

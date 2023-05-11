@@ -142,10 +142,10 @@ class ImportModelHandler():
 			# check only types we read/write data of
 			return True
 
-		if self.modelConfig.model_remote_domain:
-			_logger.info("{} remote domain is '{}'".format(
-				self.modelName, self.modelConfig.model_remote_domain
-		))
+		# if self.modelConfig.model_remote_domain:
+		# 	_logger.info("{} remote domain is '{}'".format(
+		# 		self.modelName, self.modelConfig.model_remote_domain
+		# ))
 
 		# read remote model
 		remoteFields = self.getRemoteFields()
