@@ -2,11 +2,11 @@
 <odoo>
 <data noupdate="0">
 
-<!--     <record id="module_category_colpari" model="ir.module.category">
-        <field name="name">colpari Services</field>
-        <field name="description">User access level for colpari services module</field>
+    <record id="module_category_colpari_oi" model="ir.module.category">
+        <field name="name">colpari odoo import</field>
+        <field name="description">User access level for colpari odoo import</field>
         <field name="sequence">40</field>
-    </record> -->
+    </record>
 
 <!--     <record id="group_colpari_partner" model="res.groups">
         <field name="name">Partner</field>
@@ -16,15 +16,15 @@
  -->
     <record id="group_colpari_odoo_import_user" model="res.groups">
         <field name="name">User</field>
-        <field name="category_id" ref="base.module_category_administration"/>
+        <field name="category_id" ref="colpari_odoo_import.module_category_colpari_oi"/>
         <!-- <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/> -->
         <field name="users" eval="[(4, ref('base.user_root'))]"/>
     </record>
 
     <record id="group_colpari_odoo_import_admin" model="res.groups">
         <field name="name">Administrator</field>
-        <field name="category_id" ref="base.module_category_administration"/>
-        <!-- <field name="implied_ids" eval="[(4, ref('group_colpari_user'))]"/> -->
+        <field name="category_id" ref="module_category_colpari_oi"/>
+        <field name="implied_ids" eval="[(4, ref('colpari_odoo_import.group_colpari_odoo_import_user'))]"/>
         <field name="users" eval="[(4, ref('base.user_root'))]"/>
     </record>
 </data>

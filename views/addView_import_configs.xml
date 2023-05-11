@@ -32,25 +32,27 @@
                 <field name="only_required_dependencies"/>
                 <field name="global_remote_domain" />
               </group>
-              <group>
+              <group string="Time Filter">
                 <field name="time_filter_timestamp" />
                 <group col="2"
                       attrs="{'invisible': [('time_filter_timestamp', '==', False)]}">
                   <field name="time_filter_direction" />
                   <field name="time_filter_or_at" />
                 </group>
-                <field name="time_filter_type"
-                      attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
-
-                <field name="time_filter_ago_amount"
-                        attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
-                <field name="time_filter_ago_unit"
-                        attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
-                <field name="time_filter_fix"
-                        attrs="{'invisible': ['|', ('time_filter_type', '!=', 'fix'), ('time_filter_timestamp', '==', False)]}" />
-
-                <field name="time_filter_string_final"
+                <group>
+                  <field name="time_filter_type"
                         attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
+
+                  <field name="time_filter_ago_amount"
+                          attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
+                  <field name="time_filter_ago_unit"
+                          attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
+                  <field name="time_filter_fix"
+                          attrs="{'invisible': ['|', ('time_filter_type', '!=', 'fix'), ('time_filter_timestamp', '==', False)]}" />
+
+                  <field name="time_filter_string_final"
+                          attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
+                </group>
 
               </group>
             </group>

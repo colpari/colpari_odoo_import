@@ -47,7 +47,7 @@ def TO_DICT(keyName, iterable):
 		#TODO: assert keys unique?
 		key = x[keyName]
 		if key in result:
-			raise Exception("KEy '{}' is already in dictionary".format(keys))
+			raise Exception("Key '{}' is already in dictionary".format(keys))
 		result[key] = x
 	return result
 
@@ -539,8 +539,8 @@ class ImportModelHandler():
 			self.resolveReadAndSchedule(dependencyIdsToResolve)
 
 		if not self.toCreate:
-			# nothing queued for create. return success if there are also no unresolved keys
-			return not self.keyMaterial
+			# nothing queued for create. return success but not progess
+			return (True, False) # (finished, progess)
 
 		# fetch unsatisfied dependencies of self.toCreate
 		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(
@@ -563,13 +563,14 @@ class ImportModelHandler():
 			_logger.info("{} has unresolved dependencies to {} objects of types {}".format(
 				self.modelName, sum(map(len, dependenciesPerTargetType.values())), list(dependenciesPerTargetType.keys())
 			))
-			return False
+			return (False, False) # (finished, progess)
 
 		# we could at least write some records. do so if it is not bulk data
 		if self.importStrategy == 'bulk' and _toTryLater:
 			_logger.info("{} delaying creation of {}/{} bulk records".format(
 				self.modelName, len(_toCreate), len(self.toCreate)
 			))
+			return (False, False) # (finished, progess)
 
 		_logger.info("{} creating {}/{} records".format(
 			self.modelName, len(_toCreate), len(self.toCreate)
@@ -637,7 +638,7 @@ class ImportModelHandler():
 		))
 
 		self.toCreate = _toTryLater
-		return len(createResult) # return True/number of objects changed
+		return (len(_toTryLater) == 0, True) # (success, progess)
 
 	def __wouldBeChangedBy(self, localObject, remoteValues):
 		''' returns True if remoteValues contains any values not present in localObject '''
@@ -682,7 +683,7 @@ class ImportModelHandler():
 
 	def tryUpdate(self):
 		if not self.toUpdate:
-			return True
+			return (True, False)  # (finished, progess)
 
 		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(
 			self.toUpdate, requiredOnly = False, relKeysOnly = False
@@ -720,7 +721,7 @@ class ImportModelHandler():
 			localId = self.idMap[remoteId]
 			localObject = localObjects[localId]
 			try:
-				#FIXME: evaluate uif we want this
+				#FIXME: evaluate if we want this
 				# #if self.__wouldBeChangedBy(localObject, dataToUpdate):
 				# 	# only call update if we really have different values
 				# 	#localObject.update(dataToUpdate)
@@ -747,7 +748,7 @@ class ImportModelHandler():
 
 		_logger.info("{} UPDATED {} records".format(self.modelName, recordsWritten))
 		self.toUpdate.clear()
-		return recordsWritten
+		return (True, True) # (finished, progess)
 
 	def __nameSearch(self, keyName, value, raiseOnMultiple):
 		if not value:

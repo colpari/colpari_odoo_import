@@ -163,7 +163,8 @@ class ImportContext():
 					handler.fetchRemoteKeys(dependencyIds)
 					handler.resolveReadAndSchedule(dependencyIdsToResolve)
 				elif handler.hasImportStrategy('bulk'):
-					# records with type dependency go straight to create, if they are not there already
+					# records with strategy 'bulk' go straight to create, if they are not there already
+					# this is needed because we call __crawl() also in the create phase
 					# TODO: is this a lower level decision and should maybe be handled further down the call chain?
 					newBulkIds = dependencyIds - handler.toCreate.keys() - handler.toUpdate.keys()
 					if newBulkIds:
@@ -220,36 +221,32 @@ class ImportContext():
 		self.__logHandlerStatus()
 
 		if onlyReadPhase:
-			return False
+			return True
 
 		for IS_CREATE in (True, False): # first process objects to create, then update
 			phaseName = 'create' if IS_CREATE else 'update'
-			finished = False
+			finishedAll = False
 			_pass = 0
-			while not finished:
+			while not finishedAll:
 				_pass+=1
-				finished = True
-				handlersSucceeded = 0
+				finishedAll = True
+				progressMade = False
 				dependencyIdsToResolve = {}
 
 				for handler in configuredHandlers:
-					dataToProcess = ((handler.toCreate or handler.keyMaterial) if IS_CREATE else handler.toUpdate)
-					if not dataToProcess:
-						# nothing to do (anymore) for this type
-						#handlersSucceeded += 1
-						continue
-					processedCount = handler.tryCreate(dependencyIdsToResolve) if IS_CREATE else handler.tryUpdate()
-					if processedCount:
-						# we created/updates some objects of this type. progess! :)
-						handlersSucceeded += 1
-					if not processedCount or (processedCount < len(dataToProcess)):
-						# but not all objects (yet)
-						finished = False
+					# dataToProcess = ((handler.toCreate or handler.keyMaterial) if IS_CREATE else handler.toUpdate)
+					# if not dataToProcess:
+					# 	# nothing to do (anymore) for this type
+					# 	#handlersSucceeded += 1
+					# 	continue
+					(finished, progess)  = handler.tryCreate(dependencyIdsToResolve) if IS_CREATE else handler.tryUpdate()
+					finishedAll 		&= finished
+					progressMade		|= progess
 
-				if not handlersSucceeded:
+				if not finishedAll and not progressMade:
 					self.__logHandlerStatus()
 					self.log('0_error', "Nothing found writeable in {} pass #{}".format(phaseName, _pass))
-					return
+					return False
 
 				if dependencyIdsToResolve:
 					# create phase may yield new dependencies and they in turn might yield new objects to create
@@ -258,12 +255,12 @@ class ImportContext():
 						raise Exception("There should be no new dependencies turning up in 'update' phase")
 					# crawl dependencies
 					self.__crawl(dependencyIdsToResolve, phaseInformational = 2)
-					# check if we're really finished or if any handler still has somethin toCreate
-					if finished:
-						finished = not any(map(lambda handler: handler.toCreate, configuredHandlers))
 
-				_logger.info("phase {} pass #{}, {}/{} handlers succeeded, finished={}".format(
-					phaseName, _pass, handlersSucceeded, len(configuredHandlers), finished
+					# do another turn
+					finishedAll = False
+
+				_logger.info("phase {} pass #{}, finished={}, progess={}".format(
+					phaseName, _pass, finishedAll, progressMade
 				))
 
 				self.__logHandlerStatus(notInUI = True)
