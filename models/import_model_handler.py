@@ -47,7 +47,7 @@ def TO_DICT(keyName, iterable):
 		#TODO: assert keys unique?
 		key = x[keyName]
 		if key in result:
-			raise Exception("Key '{}' is already in dictionary".format(keys))
+			raise Exception("Key '{}' is already in dictionary".format(key))
 		result[key] = x
 	return result
 
@@ -121,6 +121,7 @@ class ImportModelHandler():
 
 		self.keyMaterial	= None 	# { remoteId : { k :v, k :v... }}
 		self.idMap			= {} 	# { remoteId : localId }
+		self.idMapReverseCheck	= {}# { localdId : remoteId }
 		self.toCreate		= {} 	# { remoteId : { k :v, k :v... } }
 		self.toUpdate		= {} 	# { remoteId : { k :v, k :v... } }
 
@@ -129,6 +130,21 @@ class ImportModelHandler():
 
 	def __repr__(self):
 		return "<{} handler>".format(self.modelName)
+
+	def idMapAdd(self, localId, remoteId):
+		''' assure self.idMap has not duplicate value and we also never try to add the same key twice '''
+		if localId in self.idMapReverseCheck:
+			raise Exception("{} : local id {} was mapped to multiple remote ids : [{}, {}]".format(
+				self.modelName, localId, remoteId, self.idMapReverseCheck[localId]
+			))
+
+		if remoteId in self.idMap:
+			raise Exception("{} : remote id {} was mapped to multiple local ids : [{}, {}]".format(
+				self.modelName, remoteId, localId, self.idMap[remoteId]
+			))
+
+		self.idMap[remoteId] = localId
+		self.idMapReverseCheck[localId] = remoteId
 
 	def checkConfig(self):
 		''' NOTE: must be called right after all ImportModelHandler instances are created '''
@@ -630,7 +646,7 @@ class ImportModelHandler():
 		# _logger.info("{} 2 create: {}".format(self.modelName, recordsToCreate))
 		# _logger.info("{} created : {}".format(self.modelName, createResult))
 		for created in createResult:
-			self.idMap[recordsToCreate[i]['id']] = created['id']
+			self.idMapAdd(localId = created['id'], remoteId = recordsToCreate[i]['id'])
 			i+=1
 
 		_logger.info("{} CREATED {}/{} records ({} updates scheduled)".format(
@@ -882,8 +898,7 @@ class ImportModelHandler():
 					localEntry = self.__nameSearch('name', remoteKeys['name'], raiseOnMultiple = True)
 
 				if localEntry:
-					self.idMap[remoteId] = localEntry[0][0]
-					#_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry[0]))
+					self.idMapAdd(localEntry[0][0], remoteId)
 					resolvedIds.add(remoteId)
 				else:
 					unresolvedIds.add(remoteId)
@@ -920,7 +935,7 @@ class ImportModelHandler():
 					unresolvedIds.add(remoteId)
 
 				elif len(localEntry) == 1:
-					self.idMap[remoteId] = localEntry.id
+					self.idMapAdd(localEntry.id, remoteId)
 					#_logger.info("resolved {} {} -> {}".format(self.modelName, remoteId, localEntry.id))
 					resolvedIds.add(remoteId)
 
@@ -1003,7 +1018,7 @@ class ImportModelHandler():
 				return ids or set(self.keyMaterial.keys())
 
 		idFieldNames = self._getRemoteIdFields()
-		idFieldsWhichAreKeys = { fn for fn in idFieldNames if self.getLocalFields()[fn].get('relation') }
+		idFieldsWhichAreRelations = { fn for fn in idFieldNames if self.getLocalFields()[fn].get('relation') }
 
 		domain = self.__getDiscoveryDomain() if ids2Fetch == None else None
 		# if domain:
@@ -1036,7 +1051,7 @@ class ImportModelHandler():
 				if not fieldValue:
 					pass
 				# 	_logger.warning("{} key field '{}' for remote id {} is False in {}".format(self.modelName, fn, remoteId, record))
-				elif fn in idFieldsWhichAreKeys:
+				elif fn in idFieldsWhichAreRelations:
 					record[fn] = fieldValue[0]
 				# walk/pave key path
 				node = node.setdefault(record[fn], {})
