@@ -45,7 +45,10 @@ def TO_DICT(keyName, iterable):
 	result = {}
 	for x in iterable:
 		#TODO: assert keys unique?
-		result.setdefault(x[keyName], x)
+		key = x[keyName]
+		if key in result:
+			raise Exception("KEy '{}' is already in dictionary".format(keys))
+		result[key] = x
 	return result
 
 
@@ -778,7 +781,7 @@ class ImportModelHandler():
 
 				keyMaterial  -> resolve
 		'''
-		(resolvedIds, unresolvedIds, pendingIds) = self.__resolve() # raises if strategy != import or match
+		(resolvedIds, unresolvedIds, pendingIds) = self._resolve() # raises if strategy != import or match
 
 		# importStrategy is match and all are matched -> done
 		# OR
@@ -821,13 +824,13 @@ class ImportModelHandler():
 						)
 
 			if pendingIds:
-				# we need to fetch the data for the pending ids too, but only collect key-fied dependencies neede for resolving
+				# we need to fetch the data for the pending ids too, but only collect key-fied dependencies needed for resolving
 				# FIXME: we should forbid having relation key fields which point to 'bulk' types.
 				# 	because, if configured, this causes dangling bulk data to be put on the worklist
 				self._readRemoteDataAndCollectDepenencies(pendingIds, dependencyIdsToResolve, relKeysOnly = True)
 
 
-	def __resolve(self):
+	def _resolve(self):
 		''' splits the provided id set in 3 distincs sets:
 				1. ids we know the local id for
 				2. ids not mappable to a local id
@@ -836,7 +839,7 @@ class ImportModelHandler():
 				keyMaterial  -> resolve
 		'''
 		if not self.hasImportStrategy('match' ,'import'):
-			raise Exception("__resolve({}) : should not be called for import strategy {}".format(
+			raise Exception("_resolve({}) : should not be called for import strategy {}".format(
 				self.modelName, self.importStrategy
 		))
 
@@ -864,7 +867,7 @@ class ImportModelHandler():
 		for remoteId, remoteKeys in self.keyMaterial.items():
 			# if remoteId in self.idMap:
 			# 	# already resolved. should not happen
-			# 	_logger.warning("__resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
+			# 	_logger.warning("_resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
 			# 		self.modelName, remoteId, self.keyMaterial
 			# ))
 			# 	resolvedIds.add(remoteId)

@@ -176,6 +176,9 @@ class ImportContext():
 						handler, phaseInformational, handler.importStrategy
 					))
 
+		for handler in self.getConfiguredHandlers('import', 'match'):
+			handler._resolve()
+
 		return i
 
 	def run(self, onlyReadPhase):
@@ -239,7 +242,7 @@ class ImportContext():
 					if processedCount:
 						# we created/updates some objects of this type. progess! :)
 						handlersSucceeded += 1
-					if not processedCount or(processedCount < len(dataToProcess)):
+					if not processedCount or (processedCount < len(dataToProcess)):
 						# but not all objects (yet)
 						finished = False
 
@@ -255,7 +258,7 @@ class ImportContext():
 						raise Exception("There should be no new dependencies turning up in 'update' phase")
 					# crawl dependencies
 					self.__crawl(dependencyIdsToResolve, phaseInformational = 2)
-					# check if we're really finished of if any handler still has somethin toCreate
+					# check if we're really finished or if any handler still has somethin toCreate
 					if finished:
 						finished = not any(map(lambda handler: handler.toCreate, configuredHandlers))
 

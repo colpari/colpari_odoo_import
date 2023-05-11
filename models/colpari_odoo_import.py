@@ -55,7 +55,7 @@ class colpariOdooImport(models.Model):
         ('fix'          , 'Specific date'),
         ('nAgo'         , 'Ago from now'),
         ('lastRun'      , 'Time of last run'),
-    ])
+    ], required = True)
 
     time_filter_ago_unit = fields.Selection([
             ('days', 'Days'),
