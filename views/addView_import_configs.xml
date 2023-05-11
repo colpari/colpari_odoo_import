@@ -34,14 +34,24 @@
               </group>
               <group>
                 <field name="time_filter_timestamp" />
-                <group col="2">
+                <group col="2"
+                      attrs="{'invisible': [('time_filter_timestamp', '==', False)]}">
                   <field name="time_filter_direction" />
                   <field name="time_filter_or_at" />
                 </group>
-                <field name="time_filter_type" />
-                <field name="time_filter_ago_unit" />
-                <field name="time_filter_ago_amount" />
-                <field name="time_filter_fix" />
+                <field name="time_filter_type"
+                      attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
+
+                <field name="time_filter_ago_amount"
+                        attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
+                <field name="time_filter_ago_unit"
+                        attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
+                <field name="time_filter_fix"
+                        attrs="{'invisible': ['|', ('time_filter_type', '!=', 'fix'), ('time_filter_timestamp', '==', False)]}" />
+
+                <field name="time_filter_string_final"
+                        attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
+
               </group>
             </group>
             <separator/>
@@ -78,7 +88,7 @@
               <field name="only_required_dependencies"/>
               <field name="do_update"/>
               <field name="do_create"/>
-              <div>['&amp;', ['field', '=', python_value], ['active', '=', python_value]]</div>
+              <div>['|', ['field', '=', python_value], ['active', '=', python_value]]</div>
               <field name="model_remote_domain"/>
             </group>
               <field name="field_configs" edit="true">
@@ -109,6 +119,7 @@
               <field name="import_field"/>
               <field name="field_import_strategy"/>
               <field name="decimal_precision"/>
+              <field name="remote_field_name"/>
             </group>
             <field name="value_mappings" context="{'default_field_config' : id}">
               <tree>

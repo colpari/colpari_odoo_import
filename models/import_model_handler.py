@@ -37,6 +37,19 @@ CREATE_CONTEXTS = {
 	}
 }
 
+
+def SELECT_KEY(key):
+	return lambda x : x[key]
+
+def TO_DICT(keyName, iterable):
+	result = {}
+	for x in iterable:
+		#TODO: assert keys unique?
+		result.setdefault(x[keyName], x)
+	return result
+
+
+
 # (m1, m2, m3, m4, m5) = env['account.move'].browse([3036, 2731, 2451, 2189, 1995])
 # for f in sorted(m1.fields_get().keys()):
 #   print("{} | {} | {} | {} | {} | {}".format(f, m1[f], m2[f], m3[f], m4[f], m5[f]))
@@ -60,10 +73,23 @@ class ImportModelHandler():
 
 		self.modelConfig 	= self.importConfig.getModelConfig(modelName)
 		self.fieldConfigs	= {}
+		self.fieldNamesL2R 	= {} # field name mapping local -> remote for colpari.odoo_import_fieldconfigs with remote_field_name
+		self.fieldNamesR2L 	= {} # field name mapping remote -> local for colpari.odoo_import_fieldconfigs with remote_field_name
 
 		if self.modelConfig:
 			for fieldConfig in self.modelConfig.field_configs:
-				self.fieldConfigs[fieldConfig.import_field.name] = fieldConfig
+				fieldName = fieldConfig.import_field.name
+				self.fieldConfigs[fieldName] = fieldConfig
+				remoteFieldName = fieldConfig.remote_field_name
+				if remoteFieldName:
+					if remoteFieldName in self.fieldNamesR2L:
+						raise ValidationError("Two fields of {} divert to the same remote field name '{}' : [{}, {}]".format(
+							modelName, remoteFieldName, fieldName, self.fieldNamesR2L[fieldName]
+						))
+					self.fieldNamesR2L[remoteFieldName] = fieldName
+					self.fieldNamesL2R[fieldName] = remoteFieldName
+
+
 			self.importStrategy = self.modelConfig.model_import_strategy
 			self.matchingStrategy = self.modelConfig.matching_strategy
 		else:
@@ -100,178 +126,6 @@ class ImportModelHandler():
 
 	def __repr__(self):
 		return "<{} handler>".format(self.modelName)
-
-	def __keySelect(self, key):
-		return lambda x : x[key]
-
-	def __toDictionary(self, keyName, iterable):
-		result = {}
-		for x in iterable:
-			#TODO: assert keys unique?
-			result.setdefault(x[keyName], x)
-		return result
-
-	def hasImportStrategy(self, *strategies):
-		return self.importStrategy in strategies
-
-	def getFieldConfig(self, fieldName):
-		return self.fieldConfigs.get(fieldName)
-
-	def getFieldImportStrategy(self, fieldName):
-		if self.hasImportStrategy('match', 'ignore'):
-			return 'ignore'
-		fc = self.getFieldConfig(fieldName)
-		# unconfigured fields of imported types default to being imported
-		return fc and fc.field_import_strategy or 'import'
-
-
-	def getLocalFields(self):
-		if not self.localFields:
-			# make a copy of the field info because we inject data into it
-			self.localFields = {}
-			localOverrides = LOCAL_SCHEMA_OVERRIDE.get(self.modelName)
-			for fieldName, field in self.env[self.modelName].fields_get().items():
-				_field = dict(field)
-				fieldOverride = localOverrides and localOverrides.get(fieldName)
-				if fieldOverride:
-					_field.update(fieldOverride)
-				self.localFields[fieldName] = _field
-
-		return self.localFields
-
-	def getRemoteFields(self):
-		if not self.remoteFields:
-			self.remoteFields = self.CTX.remoteOdoo.getFieldsOfModel(self.modelName)
-		return self.remoteFields
-
-	def shouldFollowDependency(self, fieldName):
-		if not self.modelConfig:
-			raise Exception("ASSERT: shouldFollowDependency() must not be called with unconfigured type {}".format(self.modelName))
-
-		if not self.hasImportStrategy('import', 'dependency'):
-			raise Exception(
-				"ASSERT: shouldFollowDependency() must not be called with non-imported type {} (strategy={})".format(
-					self.modelName, self.importStrategy
-			))
-
-		localField = self.getLocalFields()[fieldName] # raise KeyError for unknown fields
-
-		relatedTypeName = localField.get('relation')
-		if not relatedTypeName:
-			raise Exception(
-				"ASSERT: shouldFollowDependency() must not be called with non-relation field {}.{}".format(
-					modelName, fieldName
-			))
-
-		relatedType = self.CTX.getHandler(relatedTypeName)
-		required = localField.get('required')
-
-		if relatedType.importStrategy == 'ignore':
-			if required:
-				raise ImportException("Type {} is required as dependency for {}.{} but ignored".format(
-					relatedType.modelName, self.modelName, fieldName,
-					modelName=self.modelName, fieldName=fieldName, dependencyType=relatedType.modelName
-				))
-			return False
-
-		if localField.get('type') == 'one2many':
-			# always follow one2many TODO: sure?/configurable?
-			return relatedType
-
-		if not required:
-			if self.importConfig.only_required_dependencies or self.modelConfig.only_required_dependencies:
-				return False
-
-		return relatedType
-
-
-	def getFieldsToImport(self):
-		if self.fieldsToImport == None:
-			if not self.hasImportStrategy('import', 'dependency'):
-				raise Exception("Code path error. getFieldsToImport() called for strategy {}".format(strategy))
-
-			self.fieldsToImport = {}
-			localFields = self.getLocalFields()
-			remoteFields = self.getRemoteFields()
-			followedNotified = set()
-			for fn, f in localFields.items():
-				if fn not in remoteFields:
-					continue
-				# if f.get('related'):
-				# 	continue
-				relatedTypeName = f.get('relation')
-				if relatedTypeName:
-					handler = self.shouldFollowDependency(fn)
-					if not handler:
-						continue
-					elif handler not in followedNotified: # and not handler.modelConfig
-						# log message if relatedTypeName is not configured (we implicitly follow it) once
-						self.log(
-							'3_debug', "following dependency {}::{} -> {}".format(self.modelName, fn, relatedTypeName),
-							modelName = self.modelName, fieldName = fn, dependencyType = relatedTypeName
-						)
-						followedNotified.add(handler) # log once only
-
-				self.fieldsToImport[fn] = f
-
-		return self.fieldsToImport
-
-	def getRelFieldsToImport(self):
-		if self.relFieldsToImport == None:
-			if not self.hasImportStrategy('import', 'dependency'):
-				raise Exception("Code path error. getRelFieldsToImport() called for strategy {}".format(strategy))
-
-			self.relFieldsToImport = {
-				fn : f for fn, f in self.getFieldsToImport().items() if f.get('relation')
-			}
-
-		return self.relFieldsToImport
-
-	def __getO2MFieldsWeImportTargetsOf(self):
-		if self.o2mFieldsWeImportTargetsOf == None:
-			self.o2mFieldsWeImportTargetsOf = {}
-			for fn, field in self.getRelFieldsToImport().items():
-				if (field.get('type') == 'one2many'
-				and self.CTX.getHandler(field['relation']).hasImportStrategy('import', 'dependency')):
-					self.o2mFieldsWeImportTargetsOf[fn] = field
-
-		return self.o2mFieldsWeImportTargetsOf
-
-	def _getPropertiesEntry(self, propertyName):
-		entry = self._fieldProperties.setdefault(propertyName, {})
-		if not entry:
-			# initialize if empty
-			names  = entry['names'] = set()
-			dicts  = entry['dicts'] = {}
-			values = entry['values'] = {}
-			notNames  = entry['!names'] = set()
-			notDicts  = entry['!dicts'] = {}
-			notValues = entry['!values'] = {}
-			for fn, f in self.getLocalFields().items():
-				propVal = f.get(propertyName)
-				if propVal:
-					names.add(fn)
-					dicts[fn] = f
-					values[fn] = propVal
-				else:
-					notNames.add(fn)
-					notDicts[fn] = f
-					notValues[fn] = propVal
-
-			#FIXME: freeze data
-		return entry
-
-	def fieldsWhere(self, propertyName):
-		return self._getPropertiesEntry(propertyName)['dicts']
-
-	def fieldNamesWhere(self, propertyName):
-		return self._getPropertiesEntry(propertyName)['names']
-
-	def fieldNamesWhereNot(self, propertyName):
-		return self._getPropertiesEntry(propertyName)['!names']
-
-	def fieldProperties(self, propertyName):
-		return self._getPropertiesEntry(propertyName)['values']
 
 	def checkConfig(self):
 		''' NOTE: must be called right after all ImportModelHandler instances are created '''
@@ -332,7 +186,7 @@ class ImportModelHandler():
 					))
 
 			if isPartOfKey and relatedTypeName and field["type"] != 'many2one':
-				 	raise ImportException("Field X2many field {}.{} is not supported as key field: {}".format(
+					raise ImportException("Field X2many field {}.{} is not supported as key field: {}".format(
 						self.modelName, fieldName, field
 					))
 
@@ -349,7 +203,170 @@ class ImportModelHandler():
 
 		return True
 
-	def __getUnresolvedDependenciesOfRecords(self, records, requiredOnly):
+
+	def hasImportStrategy(self, *strategies):
+		return self.importStrategy in strategies
+
+	def getFieldConfig(self, fieldName):
+		return self.fieldConfigs.get(fieldName)
+
+	def getFieldImportStrategy(self, fieldName):
+		if self.hasImportStrategy('match', 'ignore'):
+			return 'ignore'
+		fc = self.getFieldConfig(fieldName)
+		# unconfigured fields of imported types default to being imported
+		return fc and fc.field_import_strategy or 'import'
+
+
+	def getLocalFields(self):
+		if not self.localFields:
+			# make a copy of the field info because we inject data into it
+			self.localFields = {}
+			localOverrides = LOCAL_SCHEMA_OVERRIDE.get(self.modelName)
+			for fieldName, field in self.env[self.modelName].fields_get().items():
+				_field = dict(field)
+				fieldOverride = localOverrides and localOverrides.get(fieldName)
+				if fieldOverride:
+					_field.update(fieldOverride)
+				self.localFields[fieldName] = _field
+
+		return self.localFields
+
+	def getRemoteFields(self): # FIXME: check all invocations if the are aware of remote diversions
+		if not self.remoteFields:
+			self.remoteFields = self.CTX.remoteOdoo.getFieldsOfModel(self.modelName)
+		return self.remoteFields
+
+	def shouldFollowDependency(self, fieldName):
+		if not self.modelConfig:
+			raise Exception("ASSERT: shouldFollowDependency() must not be called with unconfigured type {}".format(self.modelName))
+
+		if not self.hasImportStrategy('import', 'bulk'):
+			raise Exception(
+				"ASSERT: shouldFollowDependency() must not be called with non-imported type {} (strategy={})".format(
+					self.modelName, self.importStrategy
+			))
+
+		localField = self.getLocalFields()[fieldName] # raise KeyError for unknown fields
+
+		relatedTypeName = localField.get('relation')
+		if not relatedTypeName:
+			raise Exception(
+				"ASSERT: shouldFollowDependency() must not be called with non-relation field {}.{}".format(
+					modelName, fieldName
+			))
+
+		relatedType = self.CTX.getHandler(relatedTypeName)
+		required = localField.get('required')
+
+		if relatedType.importStrategy == 'ignore':
+			if required:
+				raise ImportException("Type {} is required as dependency for {}.{} but ignored".format(
+					relatedType.modelName, self.modelName, fieldName,
+					modelName=self.modelName, fieldName=fieldName, dependencyType=relatedType.modelName
+				))
+			return False
+
+		if localField.get('type') == 'one2many':
+			# always follow one2many TODO: sure?/configurable?
+			return relatedType
+
+		if not required:
+			if self.importConfig.only_required_dependencies or self.modelConfig.only_required_dependencies:
+				return False
+
+		return relatedType
+
+
+	def getFieldsToImport(self):
+		if self.fieldsToImport == None:
+			if not self.hasImportStrategy('import', 'bulk'):
+				raise Exception("Code path error. getFieldsToImport() called for strategy {}".format(self.importStrategy))
+
+			self.fieldsToImport = {}
+			localFields = self.getLocalFields()
+			remoteFields = self.getRemoteFields()
+			followedNotified = set()
+			for fn, f in localFields.items():
+				if fn not in remoteFields:
+					continue
+				# if f.get('related'):
+				# 	continue
+				relatedTypeName = f.get('relation')
+				if relatedTypeName:
+					handler = self.shouldFollowDependency(fn)
+					if not handler:
+						continue
+					elif handler not in followedNotified: # and not handler.modelConfig
+						# log message if relatedTypeName is not configured (we implicitly follow it) once
+						self.log(
+							'3_debug', "following dependency {}::{} -> {}".format(self.modelName, fn, relatedTypeName),
+							modelName = self.modelName, fieldName = fn, dependencyType = relatedTypeName
+						)
+						followedNotified.add(handler) # log once only
+
+				self.fieldsToImport[fn] = f
+
+		return self.fieldsToImport
+
+	def getRelFieldsToImport(self):
+		if self.relFieldsToImport == None:
+			if not self.hasImportStrategy('import', 'bulk'):
+				raise Exception("Code path error. getRelFieldsToImport() called for strategy {}".format(strategy))
+
+			self.relFieldsToImport = {
+				fn : f for fn, f in self.getFieldsToImport().items() if f.get('relation')
+			}
+
+		return self.relFieldsToImport
+
+	def __getO2MFieldsWeImportTargetsOf(self):
+		if self.o2mFieldsWeImportTargetsOf == None:
+			self.o2mFieldsWeImportTargetsOf = {}
+			for fn, field in self.getRelFieldsToImport().items():
+				if (field.get('type') == 'one2many'
+				and self.CTX.getHandler(field['relation']).hasImportStrategy('import', 'bulk')):
+					self.o2mFieldsWeImportTargetsOf[fn] = field
+
+		return self.o2mFieldsWeImportTargetsOf
+
+	def _getPropertiesEntry(self, propertyName):
+		entry = self._fieldProperties.setdefault(propertyName, {})
+		if not entry:
+			# initialize if empty
+			names  = entry['names'] = set()
+			dicts  = entry['dicts'] = {}
+			values = entry['values'] = {}
+			notNames  = entry['!names'] = set()
+			notDicts  = entry['!dicts'] = {}
+			notValues = entry['!values'] = {}
+			for fn, f in self.getLocalFields().items():
+				propVal = f.get(propertyName)
+				if propVal:
+					names.add(fn)
+					dicts[fn] = f
+					values[fn] = propVal
+				else:
+					notNames.add(fn)
+					notDicts[fn] = f
+					notValues[fn] = propVal
+
+			#FIXME: freeze data
+		return entry
+
+	def fieldsWhere(self, propertyName):
+		return self._getPropertiesEntry(propertyName)['dicts']
+
+	def fieldNamesWhere(self, propertyName):
+		return self._getPropertiesEntry(propertyName)['names']
+
+	def fieldNamesWhereNot(self, propertyName):
+		return self._getPropertiesEntry(propertyName)['!names']
+
+	def fieldProperties(self, propertyName):
+		return self._getPropertiesEntry(propertyName)['values']
+
+	def __getUnresolvedDependenciesOfRecords(self, records, requiredOnly, relKeysOnly):
 
 		dependenciesPerTargetType = {}
 		dependenciesPerId = {}
@@ -358,6 +375,9 @@ class ImportModelHandler():
 
 		if requiredOnly:
 			relFieldNames = set(relFieldNames) & self.fieldNamesWhere('required')
+
+		if relKeysOnly:
+			relFieldNames = [ fn for fn in relFieldNames if self.getFieldImportStrategy(fn) == 'key' ]
 
 		for relationFieldName in relFieldNames:
 			relatedType = self.shouldFollowDependency(relationFieldName)
@@ -451,14 +471,16 @@ class ImportModelHandler():
 
 		return result
 
-	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve):
+	def _readRemoteDataAndCollectDepenencies(self, remoteIds, dependencyIdsToResolve, relKeysOnly = False):
 		# fetch remote data
 		if not remoteIds:
 			raise Exception("Empty id set")
 		remoteData = self.readRemoteData(remoteIds)
 
 		#TODO: are there cases where we could go with requiredOnly = True and thus save time?
-		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(remoteData, requiredOnly = False)
+		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(
+			remoteData, requiredOnly = False, relKeysOnly = relKeysOnly
+		)
 
 		for _type, ids in dependenciesPerTargetType.items():
 			dependencyIdsToResolve.setdefault(_type, set()).update(ids)
@@ -507,7 +529,7 @@ class ImportModelHandler():
 
 	def tryCreate(self, dependencyIdsToResolve):
 
-		if not self.hasImportStrategy('import', 'dependency'):
+		if not self.hasImportStrategy('import', 'bulk'):
 			raise Exception("tryCreate({}) should not be called for importStrategy '{}'".format(self.modelName, self.importStrategy))
 
 		if self.importStrategy == 'import':
@@ -518,7 +540,9 @@ class ImportModelHandler():
 			return not self.keyMaterial
 
 		# fetch unsatisfied dependencies of self.toCreate
-		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(self.toCreate, requiredOnly = True)
+		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(
+			self.toCreate, requiredOnly = True, relKeysOnly = False
+		)
 
 		# check which object dependencies are fully resolved now and can be created
 		_toCreate = {}
@@ -538,7 +562,12 @@ class ImportModelHandler():
 			))
 			return False
 
-		# we can at least write some records
+		# we could at least write some records. do so if it is not bulk data
+		if self.importStrategy == 'bulk' and _toTryLater:
+			_logger.info("{} delaying creation of {}/{} bulk records".format(
+				self.modelName, len(_toCreate), len(self.toCreate)
+			))
+
 		_logger.info("{} creating {}/{} records".format(
 			self.modelName, len(_toCreate), len(self.toCreate)
 		))
@@ -600,8 +629,8 @@ class ImportModelHandler():
 			self.idMap[recordsToCreate[i]['id']] = created['id']
 			i+=1
 
-		_logger.info("CREATED {}/{} {} records ({} updates scheduled)".format(
-			len(recordsToCreate), len(self.toCreate), self.modelName, updatesScheduled
+		_logger.info("{} CREATED {}/{} records ({} updates scheduled)".format(
+			self.modelName, len(recordsToCreate), len(self.toCreate), updatesScheduled
 		))
 
 		self.toCreate = _toTryLater
@@ -652,7 +681,9 @@ class ImportModelHandler():
 		if not self.toUpdate:
 			return True
 
-		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(self.toUpdate, requiredOnly = False)
+		(dependenciesPerTargetType, dependenciesPerId) = self.__getUnresolvedDependenciesOfRecords(
+			self.toUpdate, requiredOnly = False, relKeysOnly = False
+		)
 
 		# any unresolved dependencies left?
 		if dependenciesPerTargetType:
@@ -671,7 +702,7 @@ class ImportModelHandler():
 		# map ids of objectSetMapped
 		mappedIds = list(map(self.idMap.__getitem__, objectSetMapped.keys()))
 		# locally fetch objects with mapped ids
-		localObjects = self.__toDictionary('id',
+		localObjects = TO_DICT('id',
 			self.env[self.modelName].browse(mappedIds)
 		)
 		# check size
@@ -711,7 +742,7 @@ class ImportModelHandler():
 
 		recordsWritten = len(self.toUpdate)
 
-		_logger.info("UPDATED {} {} records".format(recordsWritten, self.modelName))
+		_logger.info("{} UPDATED {} records".format(self.modelName, recordsWritten))
 		self.toUpdate.clear()
 		return recordsWritten
 
@@ -754,8 +785,8 @@ class ImportModelHandler():
 		# importStrategy is import and we need to schedule:
 
 		if self.importStrategy == 'import':
-			#idsToImport = set()
-			idsToImport = set(pendingIds) # we need to read these to resolve their dependencies
+			idsToImport = set()
+			#idsToImport = set(pendingIds) # we need to read these to resolve their dependencies
 
 			if self.modelConfig.do_create:
 				idsToImport.update(unresolvedIds)
@@ -788,6 +819,13 @@ class ImportModelHandler():
 								remoteId, self.modelName, idsToImport, resolvedIds, unresolvedIds, pendingIds
 							)
 						)
+
+			if pendingIds:
+				# we need to fetch the data for the pending ids too, but only collect key-fied dependencies neede for resolving
+				# FIXME: we should forbid having relation key fields which point to 'bulk' types.
+				# 	because, if configured, this causes dangling bulk data to be put on the worklist
+				self._readRemoteDataAndCollectDepenencies(pendingIds, dependencyIdsToResolve, relKeysOnly = True)
+
 
 	def __resolve(self):
 		''' splits the provided id set in 3 distincs sets:
@@ -918,9 +956,22 @@ class ImportModelHandler():
 		self.keyMaterial = pendingKeys
 		return (resolvedIds, unresolvedIds, set(pendingKeys.keys()))
 
+	def __getDiscoveryDomain(self):
+
+		result = []
+		tf = self.importConfig.getTimeFilterDomain()
+		mf = self.modelConfig.model_remote_domain and eval(self.modelConfig.model_remote_domain) or False
+
+		if mf:
+			result.append(mf)
+
+		if tf:
+			result.append(tf)
+
+		return result
+
 	def fetchRemoteKeys(self, ids): #TODO: add remote consideration domain
 
-		domain = ''
 		if ids == None: # check if intended read of ALL remote objects...
 			if not self.hasImportStrategy('import', 'match'):
 				# ... makes sense ...
@@ -950,16 +1001,15 @@ class ImportModelHandler():
 		idFieldNames = self._getRemoteIdFields()
 		idFieldsWhichAreKeys = { fn for fn in idFieldNames if self.getLocalFields()[fn].get('relation') }
 
-		#TODO: add remote consideration domain
-		records = self.remoteOdoo.readData(
-			self.modelName, idFieldNames,
-			self.importConfig.getTimeFilterDomain() if ids2Fetch == None else None,
-			self.log, ids = ids2Fetch
-		)
+		domain = self.__getDiscoveryDomain() if ids2Fetch == None else None
+		# if domain:
+		# 	_logger.info(str(domain))
+		records = self.remoteOdoo.readData(self, idFieldNames, domain, self.log, ids = ids2Fetch)
 
-		_logger.info("{} : read idFields {} of {} remote records (from {} ids)".format(
-			self.modelName, idFieldNames, len(records), len(ids2Fetch or []))
-		)
+		_logger.info("{} : read idFields {} of {} remote records (from {})".format(
+			self.modelName, idFieldNames, len(records),
+			domain or ("{} ids".format(len(ids2Fetch or [])))
+		))
 
 		if ids2Fetch and (len(ids2Fetch) != len(records)):
 			raise Exception("{} : short read of {} items while trying to get remote names of {} ids".format(
@@ -978,10 +1028,12 @@ class ImportModelHandler():
 			node = self.remoteKeyUniquenessCheck # key path start
 			for fn in idFieldNames:
 				# # take id from [id, 'name'] returned for many2one-fields
-				if fn in idFieldsWhichAreKeys:
-					record[fn] = record[fn][0]
-				# if not record[fn]:
+				fieldValue = record[fn]
+				if not fieldValue:
+					pass
 				# 	_logger.warning("{} key field '{}' for remote id {} is False in {}".format(self.modelName, fn, remoteId, record))
+				elif fn in idFieldsWhichAreKeys:
+					record[fn] = fieldValue[0]
 				# walk/pave key path
 				node = node.setdefault(record[fn], {})
 			# insert record at end of key path
@@ -1024,7 +1076,7 @@ class ImportModelHandler():
 		if idsNotPresent:
 			# read data for idsNotPresent into cache
 			fieldNamesToImport = self.getFieldsToImport().keys()
-			records = self.remoteOdoo.readData(self.modelName, fieldNamesToImport, None, self.log, ids = idsNotPresent)
+			records = self.remoteOdoo.readData(self, fieldNamesToImport, None, self.log, ids = idsNotPresent)
 
 			_logger.info("{} : read {} of {}/{} remote records with {} fields".format(
 				self.modelName, len(records), len(idsNotPresent), len(ids), len(fieldNamesToImport)
@@ -1044,7 +1096,7 @@ class ImportModelHandler():
 			# put into self.remoteData
 			for record in records:
 				self.remoteData[record['id']] = record
-				# convert many2one fields into a list with one id (they come as [id, displayName])
+				# convert many2one fields into a list with one id (they come in as [id, displayName])
 				for fn in many2oneFields:
 					value = record[fn]
 					if value:

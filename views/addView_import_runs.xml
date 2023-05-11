@@ -31,7 +31,7 @@
             attrs="{'invisible': [('field_name', '==', False)]}"
           />
           <button
-            name="actionImportAsDependency" type="object" string="-> Dependency"
+            name="actionImportAsBulk" type="object" string="-> Bulk"
             attrs="{'invisible': ['|', ('dependency_type', '==', False), ('field_name', '!=', False)]}"
           />
           <button

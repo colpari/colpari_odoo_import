@@ -36,21 +36,20 @@ class colpariOdooImport(models.Model):
 
     only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=True)
 
-    #TODO: (Muk) is there any built in method to validate the syntax of a domains?
+    #TODO: (Muk) is there any built-in method to validate the syntax of a domain?
     global_remote_domain = fields.Text(string="Global remote search domain for all types")
 
     time_filter_timestamp = fields.Selection([
-        ('none', 'None'),
         ('create_date', 'Creation Date'),
         ('write_date', 'Modification Date'),
-    ])
+    ], default=False)
 
     time_filter_direction = fields.Selection([
-        ('before', 'Before'),
         ('after', 'After'),
-    ])
+        ('before', 'Before'),
+    ], string="is", default="after")
 
-    time_filter_or_at = fields.Boolean()
+    time_filter_or_at = fields.Boolean(string="or at")
 
     time_filter_type = fields.Selection([
         ('fix'          , 'Specific date'),
@@ -59,20 +58,26 @@ class colpariOdooImport(models.Model):
     ])
 
     time_filter_ago_unit = fields.Selection([
-            ('day', 'Day'),
-            ('week', 'Week'),
-            ('month', 'Month'),
-            ('quarter', 'Quarter'),
-            ('year', 'Year'),
-    ], required=True, string='Relative Unit', default='month')
+            ('days', 'Days'),
+            ('weeks', 'Weeks'),
+            ('months', 'Months'),
+            ('years', 'Years'),
+    ], required=True, string='Relative Unit', default='months')
 
     time_filter_ago_amount = fields.Integer(string="Relative Amount")
 
     time_filter_fix = fields.Datetime(string="Fixed Time")
 
+    time_filter_string_final = fields.Char(compute="_compute_tfs", readonly=True)
+
+    @api.depends('time_filter_timestamp', 'time_filter_direction', 'time_filter_or_at', 'time_filter_type', 'time_filter_ago_unit', 'time_filter_ago_amount', 'time_filter_fix')
+    def _compute_tfs(self):
+        for record in self:
+            record.time_filter_string_final = str(record.getTimeFilterDomain())
+
     def getTimeFilterDomain(self):
         self.ensure_one()
-        if self.time_filter_timestamp == 'none':
+        if not self.time_filter_timestamp:
             return ''
 
         operator = '>' if self.time_filter_direction == 'after' else '<'
@@ -97,7 +102,7 @@ class colpariOdooImport(models.Model):
 
 
         #return "[('{}', '{}', '{}')]".format(self.time_filter_timestamp, operator, fields.Datetime.to_string(theDate))
-        return [(self.time_filter_timestamp, operator, fields.Datetime.to_string(theDate))]
+        return [self.time_filter_timestamp, operator, fields.Datetime.to_string(theDate)]
 
     #TODO: customizeable standard domains
     # archived:
@@ -152,8 +157,8 @@ class colpariOdooImportModelConfig(models.Model):
     only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=False)
 
     model_import_strategy = fields.Selection([
-        ('import'       , 'Create/update'),
-        ('dependency'   , 'Bulk dependency'), # FIXME: rename to 'bulk'
+        ('import'       , 'Create/update'), #FIXME: (Artur) abolish this in favour of a ignored types list on colpari.odoo_import_config
+        ('bulk'         , 'Bulk dependency'), #FIXME: rename to 'bulk'
         ('match'        , 'Match'),
         ('ignore'       , 'Ignore'),
     ], default='import', required=True)
@@ -235,6 +240,8 @@ class colpariOdooImportFieldConfig(models.Model):
     value_mappings = fields.One2many('colpari.odoo_import_fieldmapping', 'field_config')
 
     decimal_precision = fields.Integer()
+
+    remote_field_name = fields.Char(help="Map this field from a remote field with another name")
 
     def mapsToDefaultValue(self):
         ''' returns the local value to map to iff there is exactly one mapping with an empty remote value '''
