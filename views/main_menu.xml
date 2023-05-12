@@ -2,8 +2,8 @@
 <odoo>
   <data>
     <!-- colpari root -->
-    <menuitem name="colpari" id="colpari_odoo_import.menu_root"
-        web_icon="colpari_services,static/src/img/icon-colpari-services.png"
+    <!-- TODO: web_icon="colpari_odoo_import,static/src/img/icon-colpari-services.png" -->
+    <menuitem name="colpari odoo import" id="colpari_odoo_import.menu_root"
         groups="group_colpari_odoo_import_user" sequence="10" />
 
 
