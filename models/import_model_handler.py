@@ -509,7 +509,7 @@ class ImportModelHandler():
 	def _getRemoteIdFields(self):
 		''' determines the required fields for identifying the remote models  '''
 		if self.remoteIdFields == None:
-			if self.matchingStrategy == 'odooName':
+			if self.matchingStrategy.startswith('odooName'):
 				self.remoteIdFields = { 'display_name' }
 				if 'name' in self.getRemoteFields():
 					self.remoteIdFields.add('name')
@@ -766,30 +766,6 @@ class ImportModelHandler():
 		self.toUpdate.clear()
 		return (True, True) # (finished, progess)
 
-	def __nameSearch(self, keyName, value, raiseOnMultiple):
-		if not value:
-			# do not search for empty names
-			self.log("1_warning", "{} empty remote key value for field '{}'".format(
-				self.modelName, keyName), modelName = self.modelName
-			)
-			return None
-
-		localEntry = self.env[self.modelName].name_search(value, operator = '=')
-		# if localEntry:
-		# 	#_logger.info("__nameSearch({}, {}, {}) = {}".format(self.modelName, keyName, value, localEntry))
-		if len(localEntry) > 1:
-			msg = "Remote {} '{}' for {} maps to multiple local names:\n{}".format(
-				keyName, value, self.modelName, localEntry
-			)
-			if raiseOnMultiple:
-				raise ImportException(msg, modelName = self.modelName)
-			else:
-				self.log("1_warning", msg, modelName = self.modelName)
-
-		# 	return localEntry[0]
-
-		return localEntry
-
 	def resolveReadAndSchedule(self, dependencyIdsToResolve):
 		''' splits the provided id set in 3 distincs sets:
 				1. ids we know the local id for
@@ -798,7 +774,7 @@ class ImportModelHandler():
 
 				keyMaterial  -> resolve
 		'''
-		(resolvedIds, unresolvedIds, pendingIds) = self._resolve() # raises if strategy != import or match
+		(resolvedIds, unresolvedIds, pendingIds) = self.__resolve() # raises if strategy != import or match
 
 		# importStrategy is match and all are matched -> done
 		# OR
@@ -846,8 +822,29 @@ class ImportModelHandler():
 				# 	because, if configured, this causes dangling bulk data to be put on the worklist
 				self._readRemoteDataAndCollectDepenencies(pendingIds, dependencyIdsToResolve, relKeysOnly = True)
 
+	def __nameSearch(self, keyName, value, raiseOnMultiple):
+		if not value:
+			# do not search for empty names
+			self.log("1_warning", "{} empty remote key value for field '{}'".format(
+				self.modelName, keyName), modelName = self.modelName
+			)
+			return None
 
-	def _resolve(self):
+		localEntry = self.env[self.modelName].name_search(value, operator = '=')
+		# if localEntry:
+		# 	#_logger.info("__nameSearch({}, {}, {}) = {}".format(self.modelName, keyName, value, localEntry))
+		if len(localEntry) > 1:
+			msg = "Remote {} '{}' for {} maps to multiple local names:\n{}".format(
+				keyName, value, self.modelName, localEntry
+			)
+			if raiseOnMultiple:
+				raise ImportException(msg, modelName = self.modelName)
+			else:
+				self.log("1_warning", msg, modelName = self.modelName)
+
+		return localEntry
+
+	def __resolve(self):
 		''' splits the provided id set in 3 distincs sets:
 				1. ids we know the local id for
 				2. ids not mappable to a local id
@@ -856,7 +853,7 @@ class ImportModelHandler():
 				keyMaterial  -> resolve
 		'''
 		if not self.hasImportStrategy('match' ,'import'):
-			raise Exception("_resolve({}) : should not be called for import strategy {}".format(
+			raise Exception("__resolve({}) : should not be called for import strategy {}".format(
 				self.modelName, self.importStrategy
 		))
 
@@ -884,17 +881,20 @@ class ImportModelHandler():
 		for remoteId, remoteKeys in self.keyMaterial.items():
 			# if remoteId in self.idMap:
 			# 	# already resolved. should not happen
-			# 	_logger.warning("_resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
+			# 	_logger.warning("__resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
 			# 		self.modelName, remoteId, self.keyMaterial
 			# ))
 			# 	resolvedIds.add(remoteId)
 			# 	continue
 
-			if self.matchingStrategy == 'odooName':
-				localEntry = self.__nameSearch('display_name', remoteKeys['display_name'], raiseOnMultiple = False)
+			if self.matchingStrategy.startswith('odooName'):
+				# if self.modelName == 'res.partner':
+				# 	_logger.info("{} resolving {}".format(self.modelName, remoteKeys))
+				localEntry = self.__nameSearch('display_name', remoteKeys['display_name'], raiseOnMultiple = True)
 
-				# if we didn't find an exact hit for display_name try name if it exists
-				if (not localEntry or (len(localEntry) > 1)) and 'name' in remoteKeys:
+				# if we didn't find an exact hit for display_name try name if it exists if enabled
+				# this is for types where name_get() is not the inverse of name_search(), like res.country.state
+				if not localEntry and (self.matchingStrategy == 'odooNames') and ('name' in remoteKeys):
 					localEntry = self.__nameSearch('name', remoteKeys['name'], raiseOnMultiple = True)
 
 				if localEntry:

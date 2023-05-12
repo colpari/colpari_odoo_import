@@ -165,7 +165,8 @@ class colpariOdooImportModelConfig(models.Model):
     ], default='import', required=True)
 
     matching_strategy = fields.Selection([
-        ('odooName'     , 'by name'),
+        ('odooName'     , 'by display_name'),
+        ('odooNames'    , 'by display_name or name field'),
         ('explicitKeys' , 'by custom key'),
     ], default='odooName', required=True)
 

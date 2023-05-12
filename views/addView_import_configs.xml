@@ -49,11 +49,9 @@
                           attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
                   <field name="time_filter_fix"
                           attrs="{'invisible': ['|', ('time_filter_type', '!=', 'fix'), ('time_filter_timestamp', '==', False)]}" />
-
-                  <field name="time_filter_string_final"
-                          attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
                 </group>
-
+                <field name="time_filter_string_final"
+                        attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
               </group>
             </group>
             <separator/>

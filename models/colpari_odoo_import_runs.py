@@ -207,16 +207,16 @@ class ImportContext():
 				- (2c, 2u) -> read related "bulk" types -> 2c
 
 		'''
-		configuredHandlers = list(self.getConfiguredHandlers())
+		mainHandlers = list(self.getConfiguredHandlers('import', 'match'))
 
 		# first pass. fetch keys of import & match types, resolve and schedule
 		dependencyIdsToResolve = {}
 
-		for handler in self.getConfiguredHandlers('import', 'match'):
+		for handler in mainHandlers:
 			if handler.modelConfig.do_pivot:
 				handler.fetchRemoteKeys(ids = None)
 
-		for handler in self.getConfiguredHandlers('import', 'match'):
+		for handler in mainHandlers:
 			if handler.modelConfig.do_pivot:
 				handler.resolveReadAndSchedule(dependencyIdsToResolve)
 
@@ -242,7 +242,7 @@ class ImportContext():
 				progressMade = False
 				dependencyIdsToResolve = {}
 
-				for handler in configuredHandlers:
+				for handler in self.getConfiguredHandlers('import', 'dependency'):
 					(finished, progess)  = handler.tryCreate(dependencyIdsToResolve) if IS_CREATE else handler.tryUpdate()
 					finishedAll 		&= finished
 					progressMade		|= progess
