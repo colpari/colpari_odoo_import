@@ -649,6 +649,8 @@ class ImportModelHandler():
 			self.idMapAdd(localId = created['id'], remoteId = recordsToCreate[i]['id'])
 			i+=1
 
+		self.env[self.modelName].flush()
+
 		_logger.info("{} CREATED {}/{} records ({} updates scheduled)".format(
 			self.modelName, len(recordsToCreate), len(self.toCreate), updatesScheduled
 		))
@@ -761,7 +763,7 @@ class ImportModelHandler():
 					_logger.error(msg)
 
 		recordsWritten = len(self.toUpdate)
-
+		self.env[self.modelName].flush()
 		_logger.info("{} UPDATED {} records".format(self.modelName, recordsWritten))
 		self.toUpdate.clear()
 		return (True, True) # (finished, progess)
