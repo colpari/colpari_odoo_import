@@ -242,7 +242,7 @@ class ImportContext():
 				progressMade = False
 				dependencyIdsToResolve = {}
 
-				for handler in self.getConfiguredHandlers('import', 'dependency'):
+				for handler in self.getConfiguredHandlers('import', 'bulk'):
 					(finished, progess)  = handler.tryCreate(dependencyIdsToResolve) if IS_CREATE else handler.tryUpdate()
 					finishedAll 		&= finished
 					progressMade		|= progess
