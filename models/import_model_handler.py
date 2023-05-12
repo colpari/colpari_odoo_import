@@ -738,7 +738,7 @@ class ImportModelHandler():
 		for remoteId, dataToUpdate in objectSetMapped.items():
 			localId = self.idMap[remoteId]
 			localObject = localObjects[localId]
-			if self.modelName == 'res.bank':
+			if self.modelName == 'res.partner.bank':
 				_logger.info("{} updating {} with {}".format(self.modelName, localObject, dataToUpdate))
 			try:
 				#FIXME: evaluate if we want this
