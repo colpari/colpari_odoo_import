@@ -34,7 +34,8 @@ class OdooConnection():
 			raise UserError("Error connecting to odoo @ '{}' : {}".format(url, e))
 
 	def modelCall(self, modelName, methodName, *args, **kwargs):
-		#_logger.info("{}.modelCall({}, {}, {}, {})".format(self, modelName, methodName, args, kwargs))
+		#_logger.info("{}.modelCall({}, {}, #{}, {})".format(self, modelName, methodName, args and len(args[0]) or '<>', kwargs))
+		#_logger.info("{}.modelCall({}, {}, #{}, {})".format(self, modelName, methodName, args, kwargs))
 		return self._models.execute_kw(self._dbName, self._uid, self._password, modelName, methodName, args, kwargs)
 
 	def getFieldsOfModel(self, modelName):
@@ -118,12 +119,14 @@ class ImportContext():
 
 		#_logger.info("global time filter domain is: {}".format(self.importConfig.getTimeFilterDomain()))
 
-
 	def getHandler(self, modelName):
 		h = self._handlers.get(modelName)
 		if not h:
 			h = self._handlers[modelName] = ImportModelHandler(self, modelName)
 		return h
+
+	def hasHandler(self, modelName):
+		return modelName in self._handlers
 
 	def getConfiguredModelNames(self):
 		return [
@@ -188,6 +191,9 @@ class ImportContext():
 		# 	handler._resolve()
 
 		return i
+
+	def _runReadTest(self):
+		self.getHandler('account.move')._runReadTest()
 
 	def run(self, onlyReadPhase):
 		'''
@@ -411,6 +417,9 @@ class colpariOdooImportRun(models.Model):
 
 	def realRun(self):
 		self._run(doNotWrite = False, onlyReadPhase = False)
+
+	def _runReadTest(self):
+		ImportContext(self)._runReadTest()
 
 	def _run(self, doNotWrite, onlyReadPhase):
 		self.ensure_one()

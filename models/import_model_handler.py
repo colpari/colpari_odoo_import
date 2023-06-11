@@ -131,6 +131,12 @@ class ImportModelHandler():
 	def __repr__(self):
 		return "<{} handler>".format(self.modelName)
 
+	def __getHandler(self, modelName, ifExisting = False):
+		if ifExisting:
+			return self.CTX.hasHandler(modelName) and self.CTX.getHandler(modelName)
+		else:
+			return self.CTX.getHandler(modelName)
+
 	def idMapAdd(self, localId, remoteId):
 		''' assure self.idMap has not duplicate value and we also never try to add the same key twice '''
 		if localId in self.idMapReverseCheck:
@@ -275,7 +281,7 @@ class ImportModelHandler():
 					modelName, fieldName
 			))
 
-		relatedType = self.CTX.getHandler(relatedTypeName)
+		relatedType = self.__getHandler(relatedTypeName)
 		required = localField.get('required')
 
 		if relatedType.importStrategy == 'ignore':
@@ -296,6 +302,8 @@ class ImportModelHandler():
 
 		return relatedType
 
+	def __fnToRemote(self, fieldName):
+		return self.fieldNamesL2R and self.fieldNamesL2R.get(fieldName, fieldName) or fieldName
 
 	def getFieldsToImport(self):
 		if self.fieldsToImport == None:
@@ -307,7 +315,7 @@ class ImportModelHandler():
 			remoteFields = self.getRemoteFields()
 			followedNotified = set()
 			for fn, f in localFields.items():
-				if fn not in remoteFields:
+				if self.__fnToRemote(fn) not in remoteFields:
 					continue
 				# if f.get('related'):
 				# 	continue
@@ -436,13 +444,27 @@ class ImportModelHandler():
 
 		o2mFieldsWeImportTargetsOf = self.__getO2MFieldsWeImportTargetsOf()
 
-		for fieldName, field in self.getFieldsToImport().items():
-			if fieldName in relFields:
+		fieldsToImport = self.getFieldsToImport()
+		for fieldName, field in fieldsToImport.items():
+			if (fieldName == 'res_id') and 'res_model' in fieldsToImport:
+			# weak reference - **try** to map id's and set null otherwise
+				for remoteRecord in result.values():
+					relationFieldValue = remoteRecord.get('res_id')
+					relatedModelName = remoteRecord.get('res_model')
+					handler = relatedModelName and self.__getHandler(relatedModelName, ifExisting = True)
+					if handler and relationFieldValue:
+						mapped = handler.idMap.get(remoteRecord['res_id'], False)
+						# _logger.info("{} : mapped weak reference {}:{} => {}".format(self, relatedModelName, remoteRecord['res_id'], mapped))
+						remoteRecord['res_id'] = mapped
+					elif relationFieldValue:
+						_logger.info("{} : unable to map weak reference {}:{}".format(self, relatedModelName, relationFieldValue))
+			elif fieldName in relFields:
 			# relation field
 				removeThisField = (
 					(requiredDependenciesOnly and not field.get('required'))
 					or
-					(fieldName in o2mFieldsWeImportTargetsOf) #FIXME: this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
+					#FIXME: this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
+					(fieldName in o2mFieldsWeImportTargetsOf)
 				)
 				if removeThisField:
 					# this is to be removed because of requiredDependenciesOnly == True or o2m-field handling
@@ -528,6 +550,14 @@ class ImportModelHandler():
 				raise Exception("Model matching strategy '{}' is not supported for {}".format(self.matchingStrategy, self.modelName))
 
 		return self.remoteIdFields
+
+	def _runReadTest(self):
+		idRecords = self.remoteOdoo.readData(self, ['id'], "", self.log, ids = None)
+		ids = list(map(lambda r: r['id'], idRecords))
+		_logger.info("{} ids read".format(len(ids)))
+		for fieldName in self.getFieldsToImport().keys():
+			_logger.info("fetching field {}".format(fieldName))
+			self.remoteOdoo.readData(self, [fieldName], "", self.log, ids = ids)
 
 	def status(self):
 		checkSum = set(self.idMap.keys()) ^ (self.keyMaterial and self.keyMaterial.keys() or set()) ^ self.toUpdate.keys() ^ self.toCreate.keys()
@@ -986,10 +1016,15 @@ class ImportModelHandler():
 		mf = self.modelConfig.model_remote_domain and eval(self.modelConfig.model_remote_domain) or False
 
 		if mf:
-			result.append(mf)
+			if len(mf) > 1:
+				result += mf
+			else:
+				result.append(mf)
 
 		if tf:
 			result.append(tf)
+
+		#_logger.info("{} : domain is {}".format(self, result))
 
 		return result
 
@@ -1106,10 +1141,12 @@ class ImportModelHandler():
 			))
 
 			if len(idsNotPresent) != len(records):
-				raise Exception("Got {} records of remote model {} where we asked for {} ids".format(
+				msg = "Got {} records of remote model {} where we asked for {} ids".format(
 					len(records), self.modelName, len(idsNotPresent)
-
-				))
+				)
+				idsDelivered = list(map(lambda r : r['id'], records))
+				_logger.error("{}\nrequested: {}\ngot      : {}".format(msg, idsNotPresent, idsDelivered))
+				raise Exception(msg)
 
 			many2oneFields = set([
 				fieldName for fieldName, field in self.getRelFieldsToImport().items()

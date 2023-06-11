@@ -34,7 +34,7 @@ class colpariOdooImport(models.Model):
 
     import_source = fields.Many2one('colpari.odoo_import_source', required=True, ondelete='restrict')
 
-    only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=True)
+    only_required_dependencies = fields.Boolean(string="Ignore dependencies which are not required", default=False)
 
     #TODO: (Muk) is there any built-in method to validate the syntax of a domain?
     global_remote_domain = fields.Text(string="Global remote search domain for all types")
@@ -64,7 +64,7 @@ class colpariOdooImport(models.Model):
             ('years', 'Years'),
     ], required=True, string='Relative Unit', default='months')
 
-    time_filter_ago_amount = fields.Integer(string="Relative Amount")
+    time_filter_ago_amount = fields.Integer(string="Relative Amount", default=1)
 
     time_filter_fix = fields.Datetime(string="Fixed Time")
 
