@@ -73,7 +73,8 @@ class OdooConnection():
 		if handler.fieldNamesR2L:
 			for record in result:
 				for remoteName, localName in handler.fieldNamesR2L.items():
-					record[localName] = record.pop(remoteName)
+					if remoteName in record:
+						record[localName] = record.pop(remoteName)
 
 		return result
 
