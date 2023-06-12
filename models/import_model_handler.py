@@ -462,9 +462,10 @@ class ImportModelHandler():
 			# relation field
 				removeThisField = (
 					(requiredDependenciesOnly and not field.get('required'))
-					or
-					#FIXME: this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
-					(fieldName in o2mFieldsWeImportTargetsOf)
+					#or
+					#TODO: are there cases whe we can safely ignore one side of a m2o or o2m relation?
+					#TODO: if we want this, this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
+					#(fieldName in o2mFieldsWeImportTargetsOf)
 				)
 				if removeThisField:
 					# this is to be removed because of requiredDependenciesOnly == True or o2m-field handling
@@ -771,13 +772,14 @@ class ImportModelHandler():
 			# if self.modelName == 'res.partner.bank':
 			# 	_logger.info("{} updating {} with {}".format(self.modelName, localObject, dataToUpdate))
 			try:
-				#FIXME: evaluate if we want this
+				#TODO: MuK is there a better way to update a big set of objects?
+				#FIXME: evaluate if we want this:
 				# #if self.__wouldBeChangedBy(localObject, dataToUpdate):
 				# 	# only call update if we really have different values
 				# 	#localObject.update(dataToUpdate)
 				localObject.write(dataToUpdate)
 
-				# since we update one object at a time and it takes ages, log a message every 10 seconds
+				# since we update one object at a time and it takes aaaages, log a message every 10 seconds :)
 				processed += 1
 				now = time.time()
 				if (now - startTime) > 10:
