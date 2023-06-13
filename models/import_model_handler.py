@@ -462,10 +462,10 @@ class ImportModelHandler():
 			# relation field
 				removeThisField = (
 					(requiredDependenciesOnly and not field.get('required'))
-					#or
+					or
 					#TODO: are there cases whe we can safely ignore one side of a m2o or o2m relation?
 					#TODO: if we want this, this should maybe already be handled in getRelFieldsToImport() to save reading and processing it
-					#(fieldName in o2mFieldsWeImportTargetsOf)
+					(fieldName in o2mFieldsWeImportTargetsOf)
 				)
 				if removeThisField:
 					# this is to be removed because of requiredDependenciesOnly == True or o2m-field handling
