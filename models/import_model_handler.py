@@ -194,21 +194,24 @@ class ImportModelHandler():
 				fieldsToImport.pop(fieldName, 0)
 
 			if required:
-				if ignored:
-					raise ImportException("Field {}.{} is required but ignored in import configuration".format(self.modelName, fieldName))
-
 				if fieldName not in fieldsToImport:
 					fc = self.getFieldConfig(fieldName)
 					if not (fc and fc.mapsToDefaultValue()): # do we have a default?
-						raise ImportException(
-							"Field {}.{} is required but not to be imported (not found on remote side?) and there is no default value configured".format(
-							self.modelName, fieldName
+						self.log("1_warning", "Field {}.{} is required but not to be imported (ignored or not found on remote side) and there is no default value configured. Creation of {} objects might fail.".format(
+							self.modelName, fieldName, self.modelName
 						))
+						# raise ImportException(
+						# 	"Field {}.{} is required but not to be imported (not found on remote side?) and there is no default value configured".format(
+						# 	self.modelName, fieldName
+						# ))
 
 				if relatedTypeName and self.CTX.getHandler(relatedTypeName).importStrategy == 'ignore':
-					raise ImportException("Field {}.{} is required but it contains type {} which is explicitly ignored in import configuration".format(
-						self.modelName, fieldName, relatedTypeName
+					self.log("1_warning", "Field {}.{} is required but it contains type {} which is explicitly ignored in import configuration. Creation of {} objects might fail.".format(
+						self.modelName, fieldName, relatedTypeName, self.modelName
 					))
+					# raise ImportException("Field {}.{} is required but it contains type {} which is explicitly ignored in import configuration".format(
+					# 	self.modelName, fieldName, relatedTypeName
+					# ))
 
 			if isPartOfKey and relatedTypeName and field["type"] != 'many2one':
 					raise ImportException("Field X2many field {}.{} is not supported as key field: {}".format(
@@ -313,7 +316,7 @@ class ImportModelHandler():
 			self.fieldsToImport = {}
 			localFields = self.getLocalFields()
 			remoteFields = self.getRemoteFields()
-			followedNotified = set()
+			#followedNotified = set()
 			for fn, f in localFields.items():
 				if self.__fnToRemote(fn) not in remoteFields:
 					continue
@@ -324,13 +327,13 @@ class ImportModelHandler():
 					handler = self.shouldFollowDependency(fn)
 					if not handler:
 						continue
-					elif handler not in followedNotified: # and not handler.modelConfig
+					elif handler:# not in followedNotified: # and not handler.modelConfig
 						# log message if relatedTypeName is not configured (we implicitly follow it) once
 						self.log(
 							'3_debug', "following dependency {}::{} -> {}".format(self.modelName, fn, relatedTypeName),
 							modelName = self.modelName, fieldName = fn, dependencyType = relatedTypeName
 						)
-						followedNotified.add(handler) # log once only
+						#followedNotified.add(handler) # log once only
 
 				self.fieldsToImport[fn] = f
 
@@ -712,21 +715,29 @@ class ImportModelHandler():
 		return wouldChange
 
 	def __logUpdateObjectFailed(self, localId, localObject, remoteId, remoteRecord, dataToUpdate, e):
-		currentObjContent = str(
-			{ fn : localObject[fn] for fn in localObject._fields.keys() }
-		)
+		currentObjContent = {}
+		try:
+			currentObjContent = str(
+				{ fn : localObject[fn] for fn in localObject._fields.keys() }
+			)
+		except Exception:
+			pass
+
 		msg = "update for {}.{} (remoteId={}) with FAILED: {}\ncurrent content:{}\nupdate content :{}\nremote content :{}".format(
 				self.modelName, localId, remoteId, e, currentObjContent, dataToUpdate, remoteRecord
 			)
 
 		# debug unbalanced account.moves when account.move.line update fails
 		if localObject._name == 'account.move.line':
-			for line in localObject.move_id.line_ids:
-				msg+="\n{} cred={}, deb={}, bal={}".format(line, line.credit, line.debit, line.balance)
-			csum = sum(localObject.move_id.line_ids.mapped('credit'))
-			dsum = sum(localObject.move_id.line_ids.mapped('debit'))
-			bsum = sum(localObject.move_id.line_ids.mapped('balance'))
-			msg+="\ncsum={}, dsum={}, bsum={}, +/- c/d = {}".format(csum, dsum, bsum, csum-dsum)
+			try:
+				for line in localObject.move_id.line_ids:
+					msg+="\n{} cred={}, deb={}, bal={}".format(line, line.credit, line.debit, line.balance)
+				csum = sum(localObject.move_id.line_ids.mapped('credit'))
+				dsum = sum(localObject.move_id.line_ids.mapped('debit'))
+				bsum = sum(localObject.move_id.line_ids.mapped('balance'))
+				msg+="\ncsum={}, dsum={}, bsum={}, +/- c/d = {}".format(csum, dsum, bsum, csum-dsum)
+			except Exception:
+				pass
 
 		return msg
 
@@ -791,10 +802,10 @@ class ImportModelHandler():
 			except Exception as e:
 				failed +=1
 				msg = self.__logUpdateObjectFailed(localId, localObject, remoteId, self.toUpdate[remoteId], dataToUpdate, e)
-				if failed == 30:
-					raise ImportException(msg, modelName = self.modelName)
-				else:
-					_logger.error(msg)
+				# if failed == 30:
+				raise ImportException(msg, modelName = self.modelName)
+				# else:
+				# 	_logger.error(msg)
 
 		recordsWritten = len(self.toUpdate)
 		self.env[self.modelName].flush()
@@ -1018,15 +1029,16 @@ class ImportModelHandler():
 		mf = self.modelConfig.model_remote_domain and eval(self.modelConfig.model_remote_domain) or False
 
 		if mf:
-			if len(mf) > 1:
+			# if len(mf) > 1:
 				result += mf
-			else:
-				result.append(mf)
+			# else:
+			# 	result.append(mf)
 
 		if tf:
-			result.append(tf)
+			# result.append(tf)
+			result += tf
 
-		#_logger.info("{} : domain is {}".format(self, result))
+		_logger.info("{} : domain is {}".format(self, result))
 
 		return result
 
@@ -1079,7 +1091,10 @@ class ImportModelHandler():
 		failOnRecordsWithAmbigousRemoteKeys = []
 		for record in records:
 			# build index
-			remoteId = record.pop('id')
+			remoteId = record['id']
+			if 'id' not in idFieldNames:
+				del record['id']
+
 			self.keyMaterial[remoteId] = record
 
 			# check uniqueness. create path of key values in remote self.remoteKeyUniquenessCheck and see if there is more than one object at the end of it
