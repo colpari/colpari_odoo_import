@@ -1030,13 +1030,13 @@ class ImportModelHandler():
 
 		if mf:
 			# if len(mf) > 1:
-				result += mf
+			#	result += mf
 			# else:
-			# 	result.append(mf)
+				result.append(mf)
 
 		if tf:
-			# result.append(tf)
-			result += tf
+			result.append(tf)
+			#result += tf
 
 		_logger.info("{} : domain is {}".format(self, result))
 
