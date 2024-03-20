@@ -1029,9 +1029,9 @@ class ImportModelHandler():
 		mf = self.modelConfig.model_remote_domain and eval(self.modelConfig.model_remote_domain) or False
 
 		if mf:
-			# if len(mf) > 1:
-			#	result += mf
-			# else:
+			if len(mf) > 1:
+				result += mf
+			else:
 				result.append(mf)
 
 		if tf:
