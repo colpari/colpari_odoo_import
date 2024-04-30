@@ -533,7 +533,7 @@ class ImportModelHandler():
 		return remoteData
 
 	def _getRemoteIdFields(self):
-		''' determines the required fields for identifying the remote models  '''
+		''' determines the required fields for identifying the remote models '''
 		if self.remoteIdFields == None:
 			if self.matchingStrategy.startswith('odooName'):
 				self.remoteIdFields = { 'display_name' }
@@ -545,11 +545,11 @@ class ImportModelHandler():
 				if not self.remoteIdFields:
 					raise UserError("Model type {} has matching strategy 'explicitKey' but no key fields are configured")
 
-				unimportedKeyFields = self.remoteIdFields - self.getFieldsToImport().keys()
-				if unimportedKeyFields:
-					raise ImportException("The fields {} of type {} are configured as key but not to be imported".format(
-						unimportedKeyFields, self.modelName
-					))
+				# unimportedKeyFields = self.remoteIdFields - self.getFieldsToImport().keys()
+				# if unimportedKeyFields:
+				# 	raise ImportException("The fields {} of type {} are configured as key but not to be imported".format(
+				# 		unimportedKeyFields, self.modelName
+				# 	))
 			else:
 				raise Exception("Model matching strategy '{}' is not supported for {}".format(self.matchingStrategy, self.modelName))
 
