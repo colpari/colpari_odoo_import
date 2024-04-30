@@ -34,24 +34,18 @@
               </group>
               <group string="Time Filter">
                 <field name="time_filter_timestamp" />
-                <group col="2"
-                      attrs="{'invisible': [('time_filter_timestamp', '==', False)]}">
+                <group col="2" invisible="not time_filter_timestamp">
                   <field name="time_filter_direction" />
                   <field name="time_filter_or_at" />
                 </group>
                 <group>
-                  <field name="time_filter_type"
-                        attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
+                  <field name="time_filter_type" invisible="not time_filter_timestamp"/>
 
-                  <field name="time_filter_ago_amount"
-                          attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
-                  <field name="time_filter_ago_unit"
-                          attrs="{'invisible': ['|', ('time_filter_type', '!=', 'nAgo'), ('time_filter_timestamp', '==', False)]}" />
-                  <field name="time_filter_fix"
-                          attrs="{'invisible': ['|', ('time_filter_type', '!=', 'fix'), ('time_filter_timestamp', '==', False)]}" />
+                  <field name="time_filter_ago_amount" invisible="not time_filter_timestamp or time_filter_type != 'nAgo'"/>
+                  <field name="time_filter_ago_unit" invisible="not time_filter_timestamp or time_filter_type != 'nAgo'"/>
+                  <field name="time_filter_fix" invisible="not time_filter_timestamp or time_filter_type != 'fix'"/>
                 </group>
-                <field name="time_filter_string_final"
-                        attrs="{'invisible': [('time_filter_timestamp', '==', False)]}" />
+                <field name="time_filter_string_final" invisible="not time_filter_timestamp"/>
               </group>
             </group>
             <separator/>

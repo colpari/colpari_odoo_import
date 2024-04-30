@@ -27,21 +27,13 @@
           <field name="level" class="font-weight-bold"/>
           <field name="text"/>
           <button
-            name="actionIgnoreField" type="object" string="Ignore field"
-            attrs="{'invisible': [('field_name', '==', False)]}"
-          />
+            name="actionIgnoreField" type="object" string="Ignore field" invisible="not field_name"/>
           <button
-            name="actionImportAsBulk" type="object" string="-> Bulk"
-            attrs="{'invisible': ['|', ('dependency_type', '==', False), ('field_name', '!=', False)]}"
-          />
+            name="actionImportAsBulk" type="object" string="-> Bulk" invisible="field_name or not dependency_type"/>
           <button
-            name="actionImportFull" type="object" string="-> Import"
-            attrs="{'invisible': ['|', ('dependency_type', '==', False), ('field_name', '!=', False)]}"
-          />
+            name="actionImportFull" type="object" string="-> Import" invisible="field_name or not dependency_type"/>
           <button
-            name="actionIgnoreRelatedType" type="object" string="Ignore related type"
-            attrs="{'invisible': [('dependency_type', '==', False)]}"
-          />
+            name="actionIgnoreRelatedType" type="object" string="Ignore related type" invisible="not dependency_type"/>
           <field name="field_name" invisible="1" />
           <field name="dependency_type" invisible="1" />
         </tree>
