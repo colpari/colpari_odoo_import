@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 
-from odoo import models, fields, api
 from odoo.exceptions import ValidationError, UserError
 
 import logging
-import xmlrpc.client
-import traceback
 import time
 
 _logger = logging.getLogger("colpari_odoo_import")
