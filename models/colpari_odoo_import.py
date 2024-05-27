@@ -151,6 +151,8 @@ class colpariOdooImportModelConfig(models.Model):
 
     import_model_name = fields.Char(related='import_model.model', store=True)
 
+    import_model_name_remote = fields.Char(string="Remote model name")
+
     do_pivot = fields.Boolean(string="Pivot", default=False)
     do_create = fields.Boolean(string="Create new", default=True)
     do_update = fields.Boolean(string="Update existing", default=True)

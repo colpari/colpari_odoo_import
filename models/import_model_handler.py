@@ -75,6 +75,8 @@ class ImportModelHandler():
 		self.fieldConfigs	= {}
 		self.fieldNamesL2R 	= {} # field name mapping local -> remote for colpari.odoo_import_fieldconfigs with remote_field_name
 		self.fieldNamesR2L 	= {} # field name mapping remote -> local for colpari.odoo_import_fieldconfigs with remote_field_name
+		self.fieldValuesR2L	= {} # field value malloing remote -> local
+		self.fieldValueDefaults = {}
 
 		if self.modelConfig:
 			for fieldConfig in self.modelConfig.field_configs:
@@ -88,6 +90,21 @@ class ImportModelHandler():
 						))
 					self.fieldNamesR2L[remoteFieldName] = fieldName
 					self.fieldNamesL2R[fieldName] = remoteFieldName
+
+				for fieldValueMapping in fieldConfig.value_mappings:
+					remoteValue = fieldValueMapping.remote_value
+					localValue = fieldValueMapping.local_value
+					if not remoteValue:
+						if len(fieldConfig.value_mappings) > 1:
+							raise ValidationError(
+								"Empty remote value in field value mappings for {}::{} would only be allowed if it is the only mapping".format(
+									modelNam, fieldName
+								)
+							)
+						# local value is a default value to use instead of any remote value
+						self.fieldValueDefaults[fieldName] = localValue
+					else:
+						self.fieldValuesR2L.setdefault(fieldName, {})[remoteValue] = localValue
 
 
 			self.importStrategy = self.modelConfig.model_import_strategy
@@ -135,7 +152,7 @@ class ImportModelHandler():
 			return self.CTX.getHandler(modelName)
 
 	def idMapAdd(self, localId, remoteId):
-		''' assure self.idMap has not duplicate value and we also never try to add the same key twice '''
+		''' assure self.idMap has no duplicate value and we also never try to add the same key twice '''
 		if localId in self.idMapReverseCheck:
 			raise Exception("{} : local id {} was mapped to multiple remote ids : [{}, {}]".format(
 				self.modelName, localId, remoteId, self.idMapReverseCheck[localId]
@@ -193,7 +210,7 @@ class ImportModelHandler():
 			if required:
 				if fieldName not in fieldsToImport:
 					fc = self.getFieldConfig(fieldName)
-					if not (fc and fc.mapsToDefaultValue()): # do we have a default?
+					if fieldName not in self.fieldValueDefaults: # do we have a default?
 						self.log("1_warning", "Field {}.{} is required but not to be imported (ignored or not found on remote side) and there is no default value configured. Creation of {} objects might fail.".format(
 							self.modelName, fieldName, self.modelName
 						))
@@ -259,7 +276,9 @@ class ImportModelHandler():
 
 	def getRemoteFields(self): # FIXME: check all invocations if the are aware of remote diversions
 		if not self.remoteFields:
-			self.remoteFields = self.CTX.remoteOdoo.getFieldsOfModel(self.modelName)
+			self.remoteFields = self.CTX.remoteOdoo.getFieldsOfModel(
+				self.modelConfig.import_model_name_remote or self.modelName
+			)
 		return self.remoteFields
 
 	def shouldFollowDependency(self, fieldName):
@@ -305,6 +324,14 @@ class ImportModelHandler():
 	def __fnToRemote(self, fieldName):
 		return self.fieldNamesL2R and self.fieldNamesL2R.get(fieldName, fieldName) or fieldName
 
+	def __fieldValueToLocal(self, fieldName, remoteValue):
+		defaultValue = self.fieldValueDefaults.get(fieldName)
+		if defaultValue:
+			return defaultValue
+		mappings = self.fieldValuesR2L.get(fieldName)
+		return mappings and mappings.get(remoteValue) or remoteValue
+
+
 	def getFieldsToImport(self):
 		if self.fieldsToImport == None:
 			if not self.hasImportStrategy('import', 'bulk'):
@@ -313,7 +340,6 @@ class ImportModelHandler():
 			self.fieldsToImport = {}
 			localFields = self.getLocalFields()
 			remoteFields = self.getRemoteFields()
-			#followedNotified = set()
 			for fn, f in localFields.items():
 				if self.__fnToRemote(fn) not in remoteFields:
 					continue
@@ -324,13 +350,12 @@ class ImportModelHandler():
 					handler = self.shouldFollowDependency(fn)
 					if not handler:
 						continue
-					elif handler:# not in followedNotified: # and not handler.modelConfig
+					elif handler:
 						# log message if relatedTypeName is not configured (we implicitly follow it) once
 						self.log(
 							'3_debug', "following dependency {}::{} -> {}".format(self.modelName, fn, relatedTypeName),
 							modelName = self.modelName, fieldName = fn, dependencyType = relatedTypeName
 						)
-						#followedNotified.add(handler) # log once only
 
 				self.fieldsToImport[fn] = f
 
@@ -492,13 +517,12 @@ class ImportModelHandler():
 
 			else:
 			# normal field to map
+				# apply value mapping or possible default value for all records
+				for remoteRecord in result.values():
+					remoteRecord[fieldName] = self.__fieldValueToLocal(fieldName, remoteRecord.get(fieldName))
+
 				fc = self.getFieldConfig(fieldName)
-				defaultValue = fc and fc.mapsToDefaultValue()
 				decimalPrecision = fc and fc.decimal_precision
-				if defaultValue:
-					# apply default value for all records
-					for remoteRecord in result.values():
-						remoteRecord[fieldName] = defaultValue
 				if decimalPrecision:
 					# round values for all records
 					for remoteRecord in result.values():
@@ -889,12 +913,13 @@ class ImportModelHandler():
 		return localEntry
 
 	def __resolve(self):
-		''' splits the provided id set in 3 distincs sets:
-				1. ids we know the local id for
-				2. ids not mappable to a local id
-				3. ids we don't yet know if they belong into set 1 or set 2
+		''' Main logic of resolving remote keys to local keys.
 
-				keyMaterial  -> resolve
+				all locally unresolved keys are in self.keyMaterial
+				goal is to determine  these into 3 distincs sets:
+					1. ids we know the local id for
+					2. ids not (ever) mappable to a local id
+					3. ids we don't yet know if they belong into set 1 or set 2
 		'''
 		if not self.hasImportStrategy('match' ,'import'):
 			raise Exception("__resolve({}) : should not be called for import strategy {}".format(
@@ -923,13 +948,15 @@ class ImportModelHandler():
 
 		pendingKeys = {}
 		for remoteId, remoteKeys in self.keyMaterial.items():
-			# if remoteId in self.idMap:
-			# 	# already resolved. should not happen
-			# 	_logger.warning("__resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
-			# 		self.modelName, remoteId, self.keyMaterial
-			# ))
-			# 	resolvedIds.add(remoteId)
-			# 	continue
+			######### TESSSSST #########
+			if remoteId in self.idMap:
+				# already resolved. should not happen
+				_logger.warning("__resolve({}) : id {} is already resolved but still in keyMaterial?\n{}".format(
+					self.modelName, remoteId, self.keyMaterial
+			))
+				resolvedIds.add(remoteId)
+				continue
+			############################
 
 			if self.matchingStrategy.startswith('odooName'):
 				# if self.modelName == 'res.partner':
@@ -948,7 +975,7 @@ class ImportModelHandler():
 					unresolvedIds.add(remoteId)
 
 			elif self.matchingStrategy == 'explicitKeys':
-				# if explicitly configured keys contain relation fields the ids might
+				# if explicitly configured keys contain relation fields, the ids might
 				# have to stay pending until the relation field ids can be resolved
 				cannotResolveRemoteRelationKey = False
 				if relationKeyFieldsHandlers:
@@ -975,6 +1002,7 @@ class ImportModelHandler():
 					[fn, '=', fv] for fn, fv in remoteKeys.items()
 				]
 				localEntry = theEnv.search(domain)
+
 				if len(localEntry) < 1:
 					unresolvedIds.add(remoteId)
 
@@ -1085,13 +1113,28 @@ class ImportModelHandler():
 				self.modelName, len(records), len(ids))
 			)
 
-		failOnRecordsWithAmbigousRemoteKeys = []
+		failOnRecordsWithAmbigousRemoteKeys = [] # we collect records with ambigous remote keys here
+												 # to log not only the first but at most 30 of them before we fail
 		for record in records:
-			# build index
+			# remote 'id' is always delivered...
 			remoteId = record['id']
-			if 'id' not in idFieldNames:
+			if 'id' not in idFieldNames: # ...but not always required by us
 				del record['id']
 
+			#NOTE: sanity check of field names in record to guard
+			# against possible malicious injections by a compromised remote
+			if idFieldNames ^ record.keys():
+				# ... since it is data recieved from another process
+				# ... and shall be passed directly into odoo search domains later on
+				raise Exception(
+					"Key info for {}::{} has non-requested fields (expected: {})".format(
+						self.modelName, record, idFieldNames
+				))
+
+
+
+
+			# fill main index
 			self.keyMaterial[remoteId] = record
 
 			# check uniqueness. create path of key values in remote self.remoteKeyUniquenessCheck and see if there is more than one object at the end of it
@@ -1099,15 +1142,20 @@ class ImportModelHandler():
 			#NOTE: the order in idFieldNames hast to be stable during the runtime of one import, otherwise this breaks
 			node = self.remoteKeyUniquenessCheck # key path start
 			for fn in idFieldNames:
-				# # take id from [id, 'name'] returned for many2one-fields
 				fieldValue = record[fn]
 				if not fieldValue:
 					pass
 				# 	_logger.warning("{} key field '{}' for remote id {} is False in {}".format(self.modelName, fn, remoteId, record))
 				elif fn in idFieldsWhichAreRelations:
-					record[fn] = fieldValue[0]
+					# take id from [id, 'name'] returned for many2one-fields
+					fieldValue = record[fn] = fieldValue[0]
+
+				# apply field value mappings to keys
+				fieldValue = record[fn] = self.__fieldValueToLocal(fn, fieldValue)
+
 				# walk/pave key path
-				node = node.setdefault(record[fn], {})
+				node = node.setdefault(fieldValue, {})
+
 			# insert record at end of key path
 			node[remoteId] = record
 			if len(node) > 1:
@@ -1118,14 +1166,6 @@ class ImportModelHandler():
 				else:
 					continue
 
-			#NOTE: sanity check of field names in record...
-			if idFieldNames ^ record.keys():
-				# ... since it is data recieved from another process
-				# ... and shall be passed directly into odoo search domains later on
-				raise Exception(
-					"Key info for {}::{} has non-requested fields (expected: {})".format(
-						self.modelName, record, idFieldNames
-				))
 
 		if failOnRecordsWithAmbigousRemoteKeys:
 			raise ImportException("{} : multiple remote object ids --> key combinations:\n{}".format(

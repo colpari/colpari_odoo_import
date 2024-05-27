@@ -34,16 +34,20 @@ class OdooConnection():
 			raise UserError("Error connecting to odoo @ '{}' : {}".format(url, e))
 
 	def modelCall(self, modelName, methodName, *args, **kwargs):
+		''' this is the MAIN ENDPOINT FOR CALLS TO REMOTE '''
+
 		#_logger.info("{}.modelCall({}, {}, #{}, {})".format(self, modelName, methodName, args and len(args[0]) or '<>', kwargs))
 		#_logger.info("{}.modelCall({}, {}, #{}, {})".format(self, modelName, methodName, args, kwargs))
 		return self._models.execute_kw(self._dbName, self._uid, self._password, modelName, methodName, args, kwargs)
 
 	def getFieldsOfModel(self, modelName):
+		''' NOTE: possibly configured diversions between local and remote model name are handled by the calling ImportModelHandler '''
 		if modelName not in self._fieldInfo:
 			self._fieldInfo[modelName] = self.modelCall(modelName, 'fields_get')
 		return self._fieldInfo[modelName]
 
 	def __fieldNamesToRemote(self, handler, fieldsToRead):
+		''' map local field names to remote field names via handler.fieldNamesL2R '''
 		if handler.fieldNamesL2R:
 			return [ handler.fieldNamesL2R.get(fn, fn) for fn in fieldsToRead ]
 		else:
@@ -54,12 +58,18 @@ class OdooConnection():
 		if ids != None:
 			if not ids:
 				raise Exception("Empty id set")
-			result = self.modelCall(handler.modelName, 'read', list(ids), fields = self.__fieldNamesToRemote(handler, fieldsToRead))
+			result = self.modelCall(
+				handler.modelConfig.import_model_name_remote or handler.modelName, # map local to remote model name, if configured
+				'read', list(ids), fields = self.__fieldNamesToRemote(handler, fieldsToRead)
+			)
 			# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(
 			# 		len(result), handler.modelName, len(ids or []), len(fieldsToRead)
 			# ))
 		else:
-			result = self.modelCall(handler.modelName, 'search_read', searchDomain, fields = self.__fieldNamesToRemote(handler, fieldsToRead))
+			result = self.modelCall(
+				handler.modelConfig.import_model_name_remote or handler.modelName, # map local to remote model name, if configured
+				'search_read', searchDomain, fields = self.__fieldNamesToRemote(handler, fieldsToRead)
+			)
 			# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields, domain={}".format(
 			# 		len(result), handler.modelName, len(ids or []), len(fieldsToRead), searchDomain
 			# ))
@@ -71,6 +81,7 @@ class OdooConnection():
 		# )
 
 		if handler.fieldNamesR2L:
+			''' map remote field names to local field names via handler.fieldNamesR2L. TODO: move to method'''
 			for record in result:
 				for remoteName, localName in handler.fieldNamesR2L.items():
 					if remoteName in record:
