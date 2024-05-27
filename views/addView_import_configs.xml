@@ -84,6 +84,7 @@
           <sheet>
             <group>
               <field name="import_model"/>
+              <field name="import_model_name_remote"/>
               <field name="model_import_strategy"/>
               <field name="matching_strategy"/>
               <field name="do_pivot"/>
