@@ -130,6 +130,16 @@ class colpariOdooImport(models.Model):
             mc.update(values)
         return mc
 
+    def copy(self, default=None):
+        self.ensure_one()
+        default = default or {}
+        if not default.get('name'):
+            default['name'] = self.name + " (copy)"
+        myCopy = super().copy(default)
+        if self.model_configs:
+            myCopy.model_configs = self.model_configs.mapped(lambda r : r.copy({'import_config' : myCopy.id}))
+        return myCopy
+
 class colpariOdooImportModelConfig(models.Model):
     _name = 'colpari.odoo_import_modelconfig'
     _description = 'Import configuration for a certain model'
@@ -209,6 +219,14 @@ class colpariOdooImportModelConfig(models.Model):
         ''' returns a resh set with all explicit key field names '''
         return set(self.getConfiguredKeyFields().mapped('import_field.name'))
 
+    def copy(self, default=None):
+        self.ensure_one()
+        default = default or {}
+        myCopy = super().copy(default)
+        if self.field_configs:
+            myCopy.field_configs = self.field_configs.mapped(lambda r : r.copy({'model_config' : myCopy.id}))
+        return myCopy
+
 
 class colpariOdooImportFieldConfig(models.Model):
     _name = 'colpari.odoo_import_fieldconfig'
@@ -247,14 +265,13 @@ class colpariOdooImportFieldConfig(models.Model):
 
     remote_field_name = fields.Char(help="Map this field from a remote field with another name")
 
-    def mapsToDefaultValue(self):
-        ''' returns the local value to map to iff there is exactly one mapping with an empty remote value '''
+    def copy(self, default=None):
         self.ensure_one()
-        if len(self.value_mappings) == 1 and not self.value_mappings[0].remote_value:
-            return self.value_mappings[0].local_value
-        else:
-            return None
-
+        default = default or {}
+        myCopy = super().copy(default)
+        if self.value_mappings:
+            myCopy.value_mappings = self.value_mappings.mapped(lambda r : r.copy({'field_config' : myCopy.id}))
+        return myCopy
 
 
 class colpariOdooImportFieldMapping(models.Model):
@@ -280,3 +297,9 @@ class colpariOdooImportFieldMapping(models.Model):
                 +   "=> '{}'".format(record.local_value)
             )
 
+
+
+    # def copy(self, default=None):
+    #     _logger.info("copy({})".format(self))
+    #     self.ensure_one()
+    #     return super().copy(default)

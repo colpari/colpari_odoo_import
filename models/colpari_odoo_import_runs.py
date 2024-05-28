@@ -59,7 +59,7 @@ class OdooConnection():
 			if not ids:
 				raise Exception("Empty id set")
 			result = self.modelCall(
-				handler.modelConfig.import_model_name_remote or handler.modelName, # map local to remote model name, if configured
+				handler.remoteModelName(), # map local to remote model name, if configured
 				'read', list(ids), fields = self.__fieldNamesToRemote(handler, fieldsToRead)
 			)
 			# _logger.info("readData() : read {} remote {} records with {} ids given and {} fields".format(

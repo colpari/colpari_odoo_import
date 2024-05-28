@@ -245,6 +245,8 @@ class ImportModelHandler():
 
 		return True
 
+	def remoteModelName(self):
+		return self.modelConfig and self.modelConfig.import_model_name_remote or self.modelName
 
 	def hasImportStrategy(self, *strategies):
 		return self.importStrategy in strategies
@@ -276,9 +278,7 @@ class ImportModelHandler():
 
 	def getRemoteFields(self): # FIXME: check all invocations if the are aware of remote diversions
 		if not self.remoteFields:
-			self.remoteFields = self.CTX.remoteOdoo.getFieldsOfModel(
-				self.modelConfig.import_model_name_remote or self.modelName
-			)
+			self.remoteFields = self.CTX.remoteOdoo.getFieldsOfModel(self.remoteModelName())
 		return self.remoteFields
 
 	def shouldFollowDependency(self, fieldName):
@@ -704,7 +704,7 @@ class ImportModelHandler():
 			self.idMapAdd(localId = created['id'], remoteId = recordsToCreate[i]['id'])
 			i+=1
 
-		self.env[self.modelName].flush()
+		self.env[self.modelName].flush_model()
 
 		_logger.info("{} CREATED {}/{} records ({} updates scheduled)".format(
 			self.modelName, len(recordsToCreate), len(self.toCreate), updatesScheduled
